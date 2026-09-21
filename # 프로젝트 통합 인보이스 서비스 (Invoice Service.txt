@@ -1,0 +1,143 @@
+# 프로젝트: 통합 인보이스 서비스 (Invoice Service)
+
+## 한 줄 목표
+여러 사이트(tinpass / dealmai / pentakleva 등)에서 거래가 COMPLETED 되면,
+웹훅으로 받아 지정된 판매처·발주처·상품군으로 인보이스를 자동 생성·보관하고,
+각 사이트 관리자/본사가 조회·재발행·PDF·감사 제출할 수 있는 얇은 통합 인보이스 API 서버를 만든다.
+
+## 왜 별도 서비스인가 (이미 결정됨)
+- 인보이스 번호·PDF·판매/발주처·상품군·감사 원본은 한곳에 둔다.
+- 각 사이트에는 PDF 엔진을 넣지 않는다. 사이트는 웹훅 송신 + API 조회로만 연동.
+- NOTI(피지 노티 릴레이)나 TINPASS 본체에 엔진을 넣지 않는다. 별도 Git 저장소 + 별도 서버.
+- 무거운 ERP가 아니라 “가벼운 통합 인보이스 서비스”다.
+
+## 비즈니스 시나리오 (1차)
+- 예: 온더라인 코리아(판매처) → 온더라인 재팬(발주처)
+- USDT 매입 등 거래 완료 시 인보이스 자동 발급
+- 가상계좌(VA) 업체 요청 시 제출용으로 기록·조회·내보내기 가능해야 함
+- 사이트별로 API 키를 발급하고, 사이트마다 기본 판매처/발주처·상품 매핑을 지정
+
+## 1차 연동 대상
+1. TINPASS (Crypto) — 최우선. COMPLETED 훅에서 웹훅 송신
+2. 이후 dealmai.com, pentakleva.net 등 동일 스키마로 확장
+3. (선택) NOTI는 피지 결제완료 인보이스가 필요할 때만 웹훅 클라이언트로 참여
+
+## 아키텍처
+[tinpass / dealmai / pentakleva]
+  거래 COMPLETED
+       │  POST webhook + HMAC (사이트 API 키)
+       ▼
+[Invoice Service]  ← 이 프로젝트
+  · 허용 사이트(테넌트) 등록, API 키 발급/로테이션
+  · 판매처/발주처 프로필
+  · 상품군(카탈로그) + 사이트별 기본 매핑
+  · 인보이스 채번 · PDF 생성 · 보관 · 재발행 · 감사 로그
+       │
+       ▼
+각 사이트 관리자 UI는 Invoice API로 목록/상세/PDF 다운로드
+본사 운영은 Invoice 관리자 UI에서 마스터·키·감사 export
+
+## 역할 분담 (중요)
+- 생성·채번·PDF·원본 보관·감사 = Invoice 서버
+- 일상 조회/다운로드/재발행 UX = 각 사이트 관리자(연동 모듈)
+- 판매처·발주처·상품·키·양식 = Invoice 서버 관리 UI
+- 사이트 쪽에 인보이스 PDF 생성 로직을 넣지 말 것
+
+## 기술 방향 (제안, 합리적 기본값으로 진행)
+- Runtime: Node.js (Express 또는 Nest) + TypeScript 권장
+- DB: PostgreSQL 권장 (초기 SQLite도 가능하나 운영 전 Postgres 권장)
+- PDF: 서버 사이드 생성 (HTML→PDF 또는 PDFKit 등). 템플릿은 버전 관리
+- Auth: 사이트용 API Key + HMAC 서명(웹훅), 관리자용 세션/로그인
+- 배포: Ubuntu VPS (예: InterServer), Nginx + HTTPS, PM2 또는 systemd
+- 저사용 가정: 작은 VPS로 충분. 호출 시 발급/조회가 주 패턴
+- 저장소: 이 프로젝트 전용 GitHub repo (TINPASS repo 안에 넣지 말 것)
+
+## MVP 범위 (반드시 먼저)
+1. 관리자: 사이트(테넌트) 등록, API 키 발급, 활성/비활성
+2. 관리자: 판매처/발주처(법인 프로필) CRUD
+3. 관리자: 상품군(카탈로그) CRUD + 사이트별 기본 매핑
+4. 웹훅: POST /v1/webhooks/transactions/completed (서명 검증, 멱등 키)
+5. 자동 발행: 매핑된 판매/발주/상품으로 인보이스 생성 + PDF 저장
+6. API: 목록/상세/PDF 다운로드/재발행
+7. 감사: 발급·재발행·다운로드 이벤트 로그, 기간 export(CSV/JSON 최소)
+8. 관리자 웹 UI(간단): 마스터 + 인보이스 조회 + 키 관리
+
+## MVP에서 하지 말 것
+- 회계/세무 풀스택, 세금계산서 국세청 연동, ERP, 재고
+- 각 사이트별 다른 채번 엔진 복제
+- TINPASS/NOTI 코드베이스에 엔진 본체 구현
+- 과도한 멀티테넌트 SaaS 과설계
+
+## 웹훅 최소 페이로드 (초안 — 구현하며 확정)
+POST /v1/webhooks/transactions/completed
+Headers:
+  X-Api-Key: {siteKey}
+  X-Signature: HMAC-SHA256(body, secret)
+  X-Idempotency-Key: {unique per event}
+Body JSON 예:
+{
+  "site": "tinpass",
+  "event": "transaction.completed",
+  "occurredAt": "2026-09-18T12:00:00+09:00",
+  "transactionId": "T-...",
+  "ticketNo": "...",
+  "amount": "1000.00",
+  "currency": "USD",
+  "asset": "USDT",
+  "assetAmount": "1000.000000",
+  "buyerRef": "optional-customer-id",
+  "sellerEntityCode": "optional-override",
+  "buyerEntityCode": "optional-override",
+  "productCode": "optional-override",
+  "memo": ""
+}
+규칙:
+- seller/buyer/product 미지정 시 사이트 기본 매핑 사용
+- 동일 Idempotency-Key 재수신 시 새 인보이스 만들지 말고 기존 반환
+- 실패 시 4xx/5xx + 재시도 가능 응답 명확히
+
+## 인보이스 최소 필드
+- invoiceNo (채번 규칙: 사이트/연도 접두 등 — 확정 후 문서화)
+- issuedAt, status (issued / void / reissued)
+- seller profile snapshot, buyer profile snapshot
+- line items (상품군 기반), amount, currency, asset info
+- sourceSite, sourceTransactionId, ticketNo
+- pdfPath / pdfHash
+- createdBy (system|admin), audit trail
+
+## 보안 필수
+- 웹훅 HMAC 검증, 타임스탬프 허용 오차
+- API 키 해시 저장, 로테이션
+- 관리자 인증, 권한(본사 vs 조회만)
+- HTTPS only
+- PDF/원본 백업 전략(최소: 일 스냅샷 또는 파일+DB 백업)
+
+## 구현 순서 (이 순서대로 진행)
+1. 빈 프로젝트 스캐폴딩 + README(아키텍처/API 개요)
+2. DB 스키마 (sites, api_keys, parties, products, site_mappings, invoices, invoice_items, audit_logs)
+3. 관리자 API + 간단 관리 UI (사이트/키/판매·발주/상품/매핑)
+4. 웹훅 수신 + 멱등 + 자동 발행 + PDF
+5. 조회/다운로드/재발행 API
+6. TINPASS 연동용 샘플 페이로드·서명 검증 예제 문서
+7. 배포 스크립트(Ubuntu: nginx, pm2, env 예시). 실제 비밀번호는 repo에 넣지 말 것
+
+## 산출물
+- 동작하는 Invoice 서버 MVP
+- OpenAPI 또는 README API 문서
+- TINPASS가 붙일 웹훅 연동 가이드 (복사 가능한 예시 코드)
+- 로컬 실행 방법 + 배포 체크리스트
+
+## 작업 원칙
+- 먼저 동작하는 MVP, 과설계 금지
+- 사이트 전용 하드코딩 금지 (tinpass만 되도 설정/매핑으로 처리)
+- 커밋 메시지/문서는 한국어·영어 혼용 OK, 비밀번호·실키 커밋 금지
+- 불확실한 채번/양식 규칙은 합리적 기본값을 정하고 README에 “가정”으로 명시 후 진행
+- 막히면 질문하되, 진행 가능한 부분은 멈추지 말고 구현
+
+## 첫 응답에서 할 일
+1. 제안 스택·폴더 구조·DB 초안을 짧게 확정
+2. 프로젝트 스캐폴딩 시작
+3. 위 MVP 순서대로 구현 진행
+4. TINPASS 연동은 이 서버 API/웹훅이 준비된 뒤, 별도 지시로 tinpass 쪽에 송신 코드만 추가할 예정임을 전제
+
+지금 바로 개발을 시작해 주세요.

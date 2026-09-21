@@ -1,0 +1,128 @@
+MERGED: B54:F54, A29:A38, A11:B11, A51:B51, A56:F56, A54:A55, A3:F3, A23:A27, A2:F2, A4:F4, A12:B12, B53:F53, A40:A44, A52:F52, A46:A49, B55:F55, A1:F1, A10:B10, A13:B13, A6:F6
+A1	ONTHELINE CO.,LTD
+A2	806, AU Tower, 68, Achasan-ro, Seongdong-gu, Seoul, Republic of Korea
+A3	Tel: +82 (0) 70 8286 1053, Fax: + 82 (0) 504 444 7899
+A4	www.onthelinem.com / www.dealmai.com 
+A6	PROFORMA INVOICE
+A9	Messrs 
+E9	P/I No. :
+A10	ON THE LINE JAPAN CO., LTD / Mr. HIROSHI TAKEDA / DIRECTOR
+E10	Date    :   2026.08.01
+A11	9th Floor, Nihon Building Annex 1-2-18, Nihonbashi-kayabacho, Chuo-ku, Tokyo, Japan
+A12	Tel  : +81-6-4705-8511, Fax : +81-6-6210-2577
+A14	We are very pleased to offer you our terms and conditions as hereunder;
+A16	Origin of Goods  : 
+A17	Terms of Price   : 
+A18	Terms of Payment  :  L/C (Letter of Credit) or T/T
+A19	Time of Delivery   : 
+C21	* Please send this P/I back with your signature
+A22	Item
+B22	Description
+C22	Unit Price(YEN)
+D22	Unit
+E22	Amount(YEN)
+F22	Remark
+A23	Credit Purchase
+B23	Light credit top-up for trials and small campaigns.
+C23	775
+D23	0
+E23	=C23*D23
+B24	Enough credit for a week of moderate activity.
+C24	1550
+E24	=C24*D24
+B25	The sweet spot for solo operators and consultants.
+C25	3100
+E25	=C25*D25
+B26	For small teams running concurrent campaigns.
+C26	7750
+E26	=C26*D26
+B27	Power tier for agencies and high-volume sellers.
+C27	15500
+E27	=C27*D27
+E28	=C28*D28
+A29	1-Time Access
+B29	Unlimited credit for 72 hours.
+C29	15500
+E29	=C29*D29
+B30	A full week of unrestricted access.
+C30	23230
+E30	=C30*D30
+B31	A fortnight of unlimited activity.
+C31	46450
+E31	=C31*D31
+B32	Best for monthly campaign cycles.
+C32	77410
+E32	=C32*D32
+B33	Quarterly access — chosen by most agencies.
+C33	154820
+E33	=C33*D33
+B34	Half-year commitment with priority support.
+C34	464460
+E34	=C34*D34
+B35	Annual access — the workhorse plan.
+C35	774100
+D35	1
+E35	=C35*D35
+B36	Two-year tenure — best value per day.
+C36	1548200
+E36	=C36*D36
+B37	B type - Special offer for New Organizer
+C37	99100
+E37	=C37*D37
+B38	A type - Special offer for New Organazier
+C38	250800
+E38	=C38*D38
+E39	=C39*D39
+A40	Subscription
+B40	Rolling monthly. Cancel anytime.
+C40	77410
+E40	=C40*D40
+B41	Quarterly cadence — most popular tier.
+C41	154820
+E41	=C41*D41
+B42	Half-year commitment with priority queue.
+C42	464460
+E42	=C42*D42
+B43	Annual subscription — recommended.
+C43	774100
+E43	=C43*D43
+B44	Two-year tenure with locked pricing.
+C44	1548200
+E44	=C44*D44
+E45	=C45*D45
+A46	OMS
+B46	Issuance cost for Card
+C46	46450
+D46	1
+E46	=C46*D46
+B47	Advance
+C47	928750
+E47	=C47*D47
+B48	Deposit
+C48	928750
+E48	=C48*D48
+B49	System Install Costs
+C49	464460
+D49	1
+E49	=C49*D49
+A51	TOTAL
+E51	=SUM(E23:E50)
+A52	Payment
+A53	Date
+B53	Until Aug. 20, 2026
+A54	Terms
+B54	The above TOTAL amount must be deposited in full (The remittance fee is to be paid by the remitter)
+B55	Please deposit by the due date
+A56	Remarks
+A57	- A/C No.          : 
+B57	180-009-637906
+A58	- A/C Name      : 
+B58	ONTHELINE CO., LTD.
+A59	- Bank Add.      : 
+B59	1F LOTTE CASTLE GOLD, 269, Olympic-ro,  Songpa-gu, Seoul, Korea
+A60	- Branch name ;
+B60	Jamsil Lotte Castle Branch
+A61	- Swift Code     : 
+B61	SHBKKRSE
+A63	Accepted by
+E63	Yours very truly,

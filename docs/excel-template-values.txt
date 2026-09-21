@@ -1,0 +1,127 @@
+A1	ONTHELINE CO.,LTD
+A2	806, AU Tower, 68, Achasan-ro, Seongdong-gu, Seoul, Republic of Korea
+A3	Tel: +82 (0) 70 8286 1053, Fax: + 82 (0) 504 444 7899
+A4	www.onthelinem.com / www.dealmai.com 
+A6	PROFORMA INVOICE
+A9	Messrs 
+E9	P/I No. :
+A10	ON THE LINE JAPAN CO., LTD / Mr. HIROSHI TAKEDA / DIRECTOR
+E10	Date    :   2026.08.01
+A11	9th Floor, Nihon Building Annex 1-2-18, Nihonbashi-kayabacho, Chuo-ku, Tokyo, Japan
+A12	Tel  : +81-6-4705-8511, Fax : +81-6-6210-2577
+A14	We are very pleased to offer you our terms and conditions as hereunder;
+A16	Origin of Goods  : 
+A17	Terms of Price   : 
+A18	Terms of Payment  :  L/C (Letter of Credit) or T/T
+A19	Time of Delivery   : 
+C21	* Please send this P/I back with your signature
+A22	Item
+B22	Description
+C22	Unit Price(YEN)
+D22	Unit
+E22	Amount(YEN)
+F22	Remark
+A23	Credit Purchase
+B23	Light credit top-up for trials and small campaigns.
+C23	775
+D23	0
+E23	0
+B24	Enough credit for a week of moderate activity.
+C24	1550
+E24	0
+B25	The sweet spot for solo operators and consultants.
+C25	3100
+E25	0
+B26	For small teams running concurrent campaigns.
+C26	7750
+E26	0
+B27	Power tier for agencies and high-volume sellers.
+C27	15500
+E27	0
+E28	0
+A29	1-Time Access
+B29	Unlimited credit for 72 hours.
+C29	15500
+E29	0
+B30	A full week of unrestricted access.
+C30	23230
+E30	0
+B31	A fortnight of unlimited activity.
+C31	46450
+E31	0
+B32	Best for monthly campaign cycles.
+C32	77410
+E32	0
+B33	Quarterly access — chosen by most agencies.
+C33	154820
+E33	0
+B34	Half-year commitment with priority support.
+C34	464460
+E34	0
+B35	Annual access — the workhorse plan.
+C35	774100
+D35	1
+E35	774100
+B36	Two-year tenure — best value per day.
+C36	1548200
+E36	0
+B37	B type - Special offer for New Organizer
+C37	99100
+E37	0
+B38	A type - Special offer for New Organazier
+C38	250800
+E38	0
+E39	0
+A40	Subscription
+B40	Rolling monthly. Cancel anytime.
+C40	77410
+E40	0
+B41	Quarterly cadence — most popular tier.
+C41	154820
+E41	0
+B42	Half-year commitment with priority queue.
+C42	464460
+E42	0
+B43	Annual subscription — recommended.
+C43	774100
+E43	0
+B44	Two-year tenure with locked pricing.
+C44	1548200
+E44	0
+E45	0
+A46	OMS
+B46	Issuance cost for Card
+C46	46450
+D46	1
+E46	46450
+B47	Advance
+C47	928750
+E47	0
+B48	Deposit
+C48	928750
+E48	0
+B49	System Install Costs
+C49	464460
+D49	1
+E49	464460
+A51	TOTAL
+E51	1285010
+A52	Payment
+A53	Date
+B53	Until Aug. 20, 2026
+A54	Terms
+B54	The above TOTAL amount must be deposited in full (The remittance fee is to be paid by the remitter)
+B55	Please deposit by the due date
+A56	Remarks
+A57	- A/C No.          : 
+B57	180-009-637906
+A58	- A/C Name      : 
+B58	ONTHELINE CO., LTD.
+A59	- Bank Add.      : 
+B59	1F LOTTE CASTLE GOLD, 269, Olympic-ro,  Songpa-gu, Seoul, Korea
+A60	- Branch name ;
+B60	Jamsil Lotte Castle Branch
+A61	- Swift Code     : 
+B61	SHBKKRSE
+A63	Accepted by
+E63	Yours very truly,

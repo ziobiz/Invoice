@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en" data-shell-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice Service</title>
+  <link rel="stylesheet" href="/admin/crypto-shell.css" />
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="loginView" class="auth-wrap">
+    <div class="auth-card">
+      <div class="lang-inline">
+        <span data-i18n="lang.label">Language</span>
+        <select id="langSelect" class="pg-select" style="width:auto" onchange="setLang(this.value)">
+          <option value="ko">한국어</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="th">ไทย</option>
+          <option value="zh">中文</option>
+        </select>
+      </div>
+      <h1 id="authTitle" data-i18n="login.title">Admin Login</h1>
+      <p class="sub" id="authSub" data-i18n="login.hint">HQ admin session</p>
+      <div id="authError" class="auth-error hidden"></div>
+
+      <form id="credForm" onsubmit="return handleCredentials(event)">
+        <label class="pg-label" data-i18n="login.email">Email</label>
+        <input class="pg-input" id="loginEmail" type="email" value="admin@invoice.local" autocomplete="username" />
+        <label class="pg-label" data-i18n="login.password">Password</label>
+        <input class="pg-input" id="loginPassword" type="password" autocomplete="current-password" />
+        <div id="turnstileBox" class="hidden" style="margin:.75rem 0"></div>
+        <button class="pg-btn pg-btn-primary" type="submit" style="width:100%" data-i18n="login.submit">Sign in</button>
+      </form>
+
+      <form id="changePwForm" class="hidden" onsubmit="return handleChangePw(event)">
+        <label class="pg-label" data-i18n="auth.newPassword">New password</label>
+        <input class="pg-input" id="newPassword" type="password" />
+        <button class="pg-btn pg-btn-primary" type="submit" style="width:100%" data-i18n="auth.savePassword">Save password</button>
+      </form>
+
+      <div id="emailOtpStep" class="hidden">
+        <p class="sub" id="emailOtpHint"></p>
+        <div class="otp-boxes" id="emailOtpBoxes"></div>
+      </div>
+
+      <div id="totpEnrollStep" class="hidden">
+        <p class="sub" data-i18n="auth.enrollTotpHint">Scan QR with Google Authenticator, then enter 6 digits.</p>
+        <img id="totpQr" alt="QR" style="display:block;margin:.5rem auto;max-width:180px" />
+        <div class="otp-boxes" id="enrollOtpBoxes"></div>
+      </div>
+
+      <div id="totpLoginStep" class="hidden">
+        <p class="sub" data-i18n="auth.totpHint">Enter the 6-digit code from your authenticator app.</p>
+        <div class="otp-boxes" id="loginOtpBoxes"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHELL (Crypto AppShell parity) -->
+  <div id="appView" class="pg-shell hidden">
+    <aside class="pg-sidebar" id="sidebar">
+      <div class="pg-sidebar-logo"><span data-i18n="app.brand">Invoice</span></div>
+      <nav class="pg-nav" id="sideNav"></nav>
+      <button class="pg-btn" style="margin:.5rem;background:transparent;border-color:rgba(255,255,255,.2);color:var(--shell-nav-idle)" onclick="toggleSidebar()" data-i18n="nav.collapse">Collapse</button>
+    </aside>
+    <div class="pg-shell-main">
+      <header class="pg-session-bar">
+        <div class="pg-session-inner" id="sessionBar"></div>
+      </header>
+      <div class="pg-tabs" id="tabBar"></div>
+      <main class="pg-admin">
+        <div id="flash" class="flash hidden"></div>
+        <div id="content" class="pg-stack"></div>
+      </main>
+    </div>
+  </div>
+
+<script>
+let I18N = {}, LANG = localStorage.getItem('invoice_lang') || (navigator.language||'en').slice(0,2);
+if (!['ko','en','ja','th','zh'].includes(LANG)) LANG = 'en';
+let publicCfg = { turnstileEnabled: false, turnstileSiteKey: '' };
+let turnstileWidgetId = null;
+let turnstileToken = '';
+let flow = { changeToken:'', emailToken:'', enrollToken:'', otpToken:'' };
+let openTabs = ['dashboard'];
+let activeTab = 'dashboard';
+let adminUser = null;
+let sessionIp = '—';
+let sessionClockTimer = null;
+let userMenuOpen = false;
+let shellTheme = localStorage.getItem('invoice_shell_theme') || 'dark';
+if (!['dark','default','light'].includes(shellTheme)) shellTheme = 'dark';
+let tabletMode = localStorage.getItem('invoice_tablet') === '1';
+
+const LANG_PILLS = [
+  { code:'ko', short:'KR' },
+  { code:'ja', short:'JP' },
+  { code:'en', short:'US' },
+  { code:'zh', short:'CH' },
+  { code:'th', short:'TH' },
+];
+const THEMES = [
+  { id:'dark', key:'theme.dark' },
+  { id:'default', key:'theme.default' },
+  { id:'light', key:'theme.light' },
+];
+
+const NAV = [
+  { id:'dashboard', key:'nav.dashboard' },
+  { id:'invoices', key:'nav.invoices' },
+  { id:'sites', key:'nav.sites' },
+  { id:'parties', key:'nav.parties' },
+  { id:'products', key:'nav.products' },
+  { id:'mappings', key:'nav.mappings' },
+  { id:'users', key:'nav.users' },
+  { id:'platform', key:'nav.platform' },
+  { id:'audit', key:'nav.audit' },
+];
+
+function t(key, vars) {
+  let text = I18N[key] || key;
+  if (vars) Object.entries(vars).forEach(([k,v]) => { text = text.replaceAll('{'+k+'}', String(v)); });
+  return text;
+}
+function intlLocale(lang) {
+  return ({ ko:'ko-KR', en:'en-US', ja:'ja-JP', zh:'zh-CN', th:'th-TH' })[lang] || 'en-US';
+}
+function formatAccessTime(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth()+1).padStart(2,'0');
+  const d = String(date.getDate()).padStart(2,'0');
+  const h = String(date.getHours()).padStart(2,'0');
+  const min = String(date.getMinutes()).padStart(2,'0');
+  const sec = String(date.getSeconds()).padStart(2,'0');
+  const weekday = new Intl.DateTimeFormat(intlLocale(LANG), { weekday:'short' }).format(date);
+  return `${y}. ${m}. ${d} ${h}:${min}:${sec} ${weekday}`;
+}
+function applyShellTheme() {
+  document.documentElement.setAttribute('data-shell-theme', shellTheme);
+  document.documentElement.classList.toggle('tablet-mode', tabletMode);
+}
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.title = t('app.title');
+  document.documentElement.lang = LANG;
+  const ls = document.getElementById('langSelect');
+  if (ls) ls.value = LANG;
+  if (!document.getElementById('appView').classList.contains('hidden')) renderSessionBar();
+}
+async function loadI18n(lang) {
+  I18N = await (await fetch('/locales/'+lang+'.json')).json();
+  LANG = lang; localStorage.setItem('invoice_lang', lang); applyI18n();
+}
+async function setLang(lang) {
+  await loadI18n(lang);
+  if (!document.getElementById('appView').classList.contains('hidden')) renderShell();
+}
+function setTheme(id) {
+  shellTheme = id;
+  localStorage.setItem('invoice_shell_theme', id);
+  applyShellTheme();
+  renderSessionBar();
+}
+function toggleTablet() {
+  tabletMode = !tabletMode;
+  localStorage.setItem('invoice_tablet', tabletMode ? '1' : '0');
+  applyShellTheme();
+  renderSessionBar();
+}
+function closeAllTabs() {
+  if (openTabs.length <= 1) return;
+  openTabs = ['dashboard'];
+  activeTab = 'dashboard';
+  renderShell();
+  showTab('dashboard');
+}
+function pipe() {
+  return `<span class="pg-session-pipe" aria-hidden="true">|</span>`;
+}
+function renderSessionBar() {
+  const bar = document.getElementById('sessionBar');
+  if (!bar) return;
+  const canClose = openTabs.length > 1;
+  const roleLabel = adminUser ? t(adminUser.role === 'viewer' ? 'role.viewer' : 'role.hq') : '';
+  const name = adminUser?.name || '';
+  const email = adminUser?.email || '';
+  bar.innerHTML = `
+    <span class="pg-session-meta-label" data-i18n="theme.label">${t('theme.label')}</span>
+    <span class="pg-theme-pill">
+      ${THEMES.map(th => `<button type="button" class="pg-theme-btn ${shellTheme===th.id?'pg-theme-btn-active':'pg-theme-btn-idle'}" onclick="setTheme('${th.id}')">${t(th.key)}</button>`).join('')}
+    </span>
+    ${pipe()}
+    <label class="pg-session-meta" style="cursor:pointer;gap:.4rem">
+      <span class="pg-session-meta-label">${t('session.tablet')}</span>
+      <button type="button" role="switch" aria-checked="${tabletMode}" class="pg-tablet-switch ${tabletMode?'on':''}" onclick="toggleTablet()"><span></span></button>
+    </label>
+    ${pipe()}
+    <span class="pg-session-pill" aria-label="${t('nav.language')}">
+      ${LANG_PILLS.map(p => `<button type="button" class="pg-session-lang ${LANG===p.code?'pg-session-lang-active':'pg-session-lang-idle'}" onclick="setLang('${p.code}')">${p.short}</button>`).join('')}
+    </span>
+    ${pipe()}
+    <span class="pg-session-meta">
+      <span class="pg-session-meta-label">${t('session.accessIp')}</span>
+      <span style="color:var(--shell-session-text-muted)">:</span>
+      <span class="pg-session-meta-value" id="sessionIpVal">${sessionIp}</span>
+    </span>
+    ${pipe()}
+    <span class="pg-session-meta">
+      <span class="pg-session-meta-label">${t('session.accessTime')}</span>
+      <span style="color:var(--shell-session-text-muted)">:</span>
+      <span class="pg-session-meta-value" id="sessionTimeVal">${formatAccessTime(new Date())}</span>
+    </span>
+    ${pipe()}
+    <div class="pg-user-menu" id="userMenuWrap">
+      <button type="button" class="pg-session-user" onclick="toggleUserMenu()" aria-expanded="${userMenuOpen}">
+        <span class="pg-session-user-glyph" aria-hidden="true">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+        </span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name} <span style="opacity:.45;margin:0 .15rem">|</span> ${roleLabel}</span>
+      </button>
+      ${userMenuOpen ? `<div class="pg-user-dropdown">
+        <div class="hd"><p class="n">${name}</p><p class="e">${email}</p></div>
+        <button type="button" class="item" onclick="logout()">${t('nav.logout')}</button>
+      </div>` : ''}
+    </div>
+    <button type="button" class="pg-session-close ${canClose?'pg-session-close-active':'pg-session-close-idle'}" ${canClose?'onclick="closeAllTabs()"':'disabled'} aria-disabled="${!canClose}">
+      <span aria-hidden="true">✕</span>
+      <span>${t('nav.closeAllLabel')}</span>
+    </button>`;
+}
+function toggleUserMenu() {
+  userMenuOpen = !userMenuOpen;
+  renderSessionBar();
+}
+function startSessionClock() {
+  if (sessionClockTimer) clearInterval(sessionClockTimer);
+  sessionClockTimer = setInterval(() => {
+    const el = document.getElementById('sessionTimeVal');
+    if (el) el.textContent = formatAccessTime(new Date());
+  }, 1000);
+}
+async function loadSessionIp() {
+  try {
+    const r = await api('/admin/api/auth/session-info');
+    sessionIp = r.ip || '—';
+  } catch { sessionIp = '—'; }
+  const el = document.getElementById('sessionIpVal');
+  if (el) el.textContent = sessionIp;
+}
+
+const api = (path, opts={}) => fetch(path, {
+  credentials:'include',
+  headers:{ 'Content-Type':'application/json', 'Accept-Language': LANG, ...(opts.headers||{}) },
+  ...opts
+}).then(async r => {
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(data.error || t('error.generic'));
+  return data;
+});
+
+function showAuthStep(step) {
+  ['credForm','changePwForm','emailOtpStep','totpEnrollStep','totpLoginStep'].forEach(id => {
+    document.getElementById(id).classList.add('hidden');
+  });
+  document.getElementById(step).classList.remove('hidden');
+}
+function setAuthError(msg) {
+  const el = document.getElementById('authError');
+  if (!msg) { el.classList.add('hidden'); el.textContent=''; return; }
+  el.textContent = msg; el.classList.remove('hidden');
+}
+function buildOtp(containerId, onComplete) {
+  const box = document.getElementById(containerId);
+  box.innerHTML = '';
+  const inputs = [];
+  for (let i=0;i<6;i++) {
+    const inp = document.createElement('input');
+    inp.maxLength = 1; inp.inputMode = 'numeric'; inp.autocomplete = 'one-time-code';
+    inp.addEventListener('input', () => {
+      inp.value = inp.value.replace(/\D/g,'').slice(-1);
+      if (inp.value && i < 5) inputs[i+1].focus();
+      const code = inputs.map(x=>x.value).join('');
+      if (code.length === 6) onComplete(code);
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !inp.value && i>0) inputs[i-1].focus();
+    });
+    box.appendChild(inp); inputs.push(inp);
+  }
+  inputs[0].focus();
+}
+
+async function mountTurnstile() {
+  const box = document.getElementById('turnstileBox');
+  if (!publicCfg.turnstileEnabled || !publicCfg.turnstileSiteKey) {
+    box.classList.add('hidden'); return;
+  }
+  box.classList.remove('hidden'); box.innerHTML = '';
+  const wait = () => new Promise(r => {
+    if (window.turnstile) return r();
+    const i = setInterval(() => { if (window.turnstile) { clearInterval(i); r(); } }, 100);
+  });
+  await wait();
+  turnstileWidgetId = window.turnstile.render(box, {
+    sitekey: publicCfg.turnstileSiteKey,
+    callback: (tok) => { turnstileToken = tok; },
+    'expired-callback': () => { turnstileToken = ''; },
+  });
+}
+
+async function handleCredentials(e) {
+  e.preventDefault(); setAuthError('');
+  try {
+    if (publicCfg.turnstileEnabled && !turnstileToken) {
+      setAuthError(t('api.error.turnstileRequired')); return false;
+    }
+    const data = await api('/admin/api/auth/login', {
+      method:'POST',
+      body: JSON.stringify({
+        email: loginEmail.value,
+        password: loginPassword.value,
+        turnstileToken: turnstileToken || undefined,
+      })
+    });
+    await afterLoginStep(data);
+  } catch (err) { setAuthError(err.message); }
+  return false;
+}
+async function handleChangePw(e) {
+  e.preventDefault();
+  try {
+    const data = await api('/admin/api/auth/change-password', {
+      method:'POST', body: JSON.stringify({ changeToken: flow.changeToken, newPassword: newPassword.value })
+    });
+    await afterLoginStep(data);
+  } catch (err) { setAuthError(err.message); }
+  return false;
+}
+async function afterLoginStep(data) {
+  if (data.mustChangePassword) {
+    flow.changeToken = data.changeToken; showAuthStep('changePwForm'); return;
+  }
+  if (data.needEmailOtp) {
+    flow.emailToken = data.emailToken;
+    emailOtpHint.textContent = t('auth.emailOtpSent', { email: data.maskedEmail });
+    showAuthStep('emailOtpStep');
+    buildOtp('emailOtpBoxes', async (code) => {
+      try {
+        const r = await api('/admin/api/auth/email-otp/verify', {
+          method:'POST', body: JSON.stringify({ emailToken: flow.emailToken, code })
+        });
+        await afterLoginStep(r);
+      } catch (err) { setAuthError(err.message); }
+    });
+    return;
+  }
+  if (data.needTotpEnroll) {
+    flow.enrollToken = data.enrollToken;
+    showAuthStep('totpEnrollStep');
+    const start = await api('/admin/api/auth/totp/enroll/start', {
+      method:'POST', body: JSON.stringify({ enrollToken: flow.enrollToken })
+    });
+    totpQr.src = start.qrDataUrl;
+    buildOtp('enrollOtpBoxes', async (code) => {
+      try {
+        const r = await api('/admin/api/auth/totp/enroll/confirm', {
+          method:'POST', body: JSON.stringify({ enrollToken: flow.enrollToken, code })
+        });
+        await afterLoginStep(r);
+      } catch (err) { setAuthError(err.message); }
+    });
+    return;
+  }
+  if (data.needTotp) {
+    flow.otpToken = data.otpToken;
+    showAuthStep('totpLoginStep');
+    buildOtp('loginOtpBoxes', async (code) => {
+      try {
+        const r = await api('/admin/api/auth/totp/verify', {
+          method:'POST', body: JSON.stringify({ otpToken: flow.otpToken, code })
+        });
+        await afterLoginStep(r);
+      } catch (err) { setAuthError(err.message); }
+    });
+    return;
+  }
+  if (data.admin) boot(data.admin);
+}
+
+function boot(admin) {
+  adminUser = admin;
+  loginView.classList.add('hidden');
+  appView.classList.remove('hidden');
+  applyShellTheme();
+  applyI18n();
+  renderShell();
+  startSessionClock();
+  loadSessionIp();
+  showTab('dashboard');
+}
+function toggleSidebar() { sidebar.classList.toggle('collapsed'); }
+async function logout() { await api('/admin/api/auth/logout', { method:'POST', body:'{}' }); location.reload(); }
+
+function renderShell() {
+  sideNav.innerHTML = NAV.map(n =>
+    `<button class="${activeTab===n.id?'active':''}" onclick="showTab('${n.id}')">${t(n.key)}</button>`
+  ).join('');
+  tabBar.innerHTML = openTabs.map(id => {
+    const n = NAV.find(x=>x.id===id);
+    const canClose = id !== 'dashboard' || openTabs.length > 1;
+    return `<button class="${activeTab===id?'active':''}" onclick="showTab('${id}')">${t(n?.key||id)}${canClose && id!=='dashboard'?`<span class="pg-tab-x" onclick="event.stopPropagation();closeTab('${id}')">✕</span>`:''}</button>`;
+  }).join('');
+  renderSessionBar();
+}
+function closeTab(id) {
+  if (id === 'dashboard' && openTabs.length === 1) return;
+  openTabs = openTabs.filter(x => x !== id);
+  if (!openTabs.length) openTabs = ['dashboard'];
+  if (activeTab === id) activeTab = openTabs[openTabs.length-1];
+  renderShell();
+  showTab(activeTab);
+}
+
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('userMenuWrap');
+  if (userMenuOpen && wrap && !wrap.contains(e.target)) {
+    userMenuOpen = false;
+    renderSessionBar();
+  }
+});
+
+async function showTab(id) {
+  activeTab = id;
+  if (!openTabs.includes(id)) openTabs.push(id);
+  renderShell();
+  const loaders = { dashboard, invoices, sites, parties, products, mappings, users, platform, audit };
+  await loaders[id]?.();
+}
+
+function flash(msg) {
+  const el = document.getElementById('flash');
+  el.textContent = msg; el.classList.remove('hidden');
+}
+
+async function dashboard() {
+  const d = await api('/admin/api/platform/dashboard');
+  content.innerHTML = `
+    <p class="pg-hint">${d.siteName} · ${d.publicDomain}</p>
+    <div class="pg-card">
+      <div class="pg-card-head">${t('dash.cf.title')}</div>
+      <div class="pg-card-body">
+        <div class="pg-row">
+          <div><div class="pg-label">${t('dash.cf.origin')}</div><div class="mono">${d.originIp}</div></div>
+          <div><div class="pg-label">${t('dash.cf.domain')}</div><div class="mono">${d.publicDomain}</div></div>
+          <div><div class="pg-label">${t('dash.cf.ssl')}</div><div>${d.ssl.status} · ${d.ssl.daysRemaining ?? '-'}d</div></div>
+        </div>
+        <ul class="pg-check" style="margin-top:.75rem">
+          ${d.checklist.map(c => `<li><span class="${c.done?'ok':'no'}">${c.done?'✓':'!'}</span> ${t(c.labelKey)}</li>`).join('')}
+        </ul>
+        <p class="pg-hint" style="margin-top:.75rem">${t('dash.cf.howto')}</p>
+        <ol style="margin:.25rem 0 0;padding-left:1.1rem;font-size:12px;line-height:1.6">
+          <li>${t('dash.cf.step1')}</li>
+          <li>${t('dash.cf.step2')}</li>
+          <li>${t('dash.cf.step3')}</li>
+          <li>${t('dash.cf.step4')}</li>
+          <li>${t('dash.cf.step5')}</li>
+        </ol>
+        ${d.cloudflare.configured ? `<pre class="mono" style="margin-top:.75rem;background:#f8f9fa;padding:.5rem;overflow:auto">${JSON.stringify(d.cloudflare.records||d.cloudflare.error,null,2)}</pre>` : `<p class="pg-hint">${t('dash.cf.noToken')}</p>`}
+      </div>
+    </div>
+    <div class="pg-stat-grid">
+      <div class="pg-stat"><div class="l">${t('nav.invoices')}</div><div class="v">${d.stats.invoices}</div></div>
+      <div class="pg-stat"><div class="l">${t('nav.sites')}</div><div class="v">${d.stats.activeSites}</div></div>
+      <div class="pg-stat"><div class="l">OTP</div><div class="v">${d.otpEnabled?'ON':'OFF'}</div></div>
+      <div class="pg-stat"><div class="l">Turnstile</div><div class="v">${d.turnstileEnabled?'ON':'OFF'}</div></div>
+    </div>`;
+}
+
+async function invoices() {
+  const data = await api('/admin/api/invoices?limit=100');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('invoices.title')}</div><div class="pg-card-body">
+    <table class="pg-table"><thead><tr>
+      <th>${t('invoices.col.no')}</th><th>${t('invoices.col.site')}</th><th>${t('invoices.col.status')}</th>
+      <th>${t('invoices.col.amount')}</th><th>${t('invoices.col.tx')}</th><th></th></tr></thead>
+    <tbody>${data.items.map(i=>`<tr>
+      <td class="mono">${i.invoice_no}</td><td>${i.site_code}</td><td>${i.status}</td>
+      <td class="mono">${i.amount} ${i.currency}</td><td class="mono">${i.source_transaction_id}</td>
+      <td><a href="/admin/api/invoices/${i.id}/pdf" target="_blank">${t('invoices.pdf')}</a>
+      · <button class="pg-btn" style="margin:0;padding:.15rem .4rem" onclick="reissue('${i.id}')">${t('invoices.reissue')}</button></td>
+    </tr>`).join('') || `<tr><td colspan="6">${t('invoices.empty')}</td></tr>`}</tbody></table></div></div>`;
+}
+
+async function sites() {
+  const data = await api('/admin/api/sites');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('sites.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('sites.code')}</label><input class="pg-input" id="siteCode"/></div>
+      <div><label class="pg-label">${t('sites.name')}</label><input class="pg-input" id="siteName"/></div>
+      <div><label class="pg-label">${t('sites.notes')}</label><input class="pg-input" id="siteNotes"/></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="createSite()">${t('sites.add')}</button>
+    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('sites.code')}</th><th>${t('sites.name')}</th><th>${t('sites.active')}</th><th>${t('sites.keys')}</th></tr></thead>
+    <tbody>${data.items.map(s=>`<tr><td class="mono">${s.code}</td><td>${s.name}</td><td>${s.active}</td>
+      <td><button class="pg-btn" style="margin:0" onclick="issueKey('${s.id}','${s.code}')">${t('sites.issueKey')}</button>
+      <button class="pg-btn" style="margin:0" onclick="listKeys('${s.id}')">${t('sites.listKeys')}</button></td></tr>`).join('')}</tbody></table>
+    <div id="keysBox"></div></div></div>`;
+}
+
+async function parties() {
+  const data = await api('/admin/api/parties');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('parties.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('parties.code')}</label><input class="pg-input" id="pCode"/></div>
+      <div><label class="pg-label">${t('parties.kind')}</label><select class="pg-select" id="pKind"><option>seller</option><option>buyer</option><option>both</option></select></div>
+      <div><label class="pg-label">${t('parties.legalName')}</label><input class="pg-input" id="pLegal"/></div>
+      <div><label class="pg-label">${t('parties.country')}</label><input class="pg-input" id="pCountry"/></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="createParty()">${t('parties.add')}</button>
+    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('parties.code')}</th><th>${t('parties.kind')}</th><th>${t('parties.legalName')}</th><th>${t('parties.country')}</th></tr></thead>
+    <tbody>${data.items.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.kind}</td><td>${p.legal_name}</td><td>${p.country||''}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function products() {
+  const data = await api('/admin/api/products');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('products.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('products.code')}</label><input class="pg-input" id="prCode"/></div>
+      <div><label class="pg-label">${t('products.name')}</label><input class="pg-input" id="prName"/></div>
+      <div><label class="pg-label">${t('products.unit')}</label><input class="pg-input" id="prUnit" value="USDT"/></div>
+      <div><label class="pg-label">${t('products.currency')}</label><input class="pg-input" id="prCur" value="USD"/></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="createProduct()">${t('products.add')}</button>
+    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('products.code')}</th><th>${t('products.name')}</th><th>${t('products.unit')}</th><th>${t('products.currency')}</th></tr></thead>
+    <tbody>${data.items.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.name}</td><td>${p.unit}</td><td>${p.default_currency}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function mappings() {
+  const [maps, sites, parties, products] = await Promise.all([
+    api('/admin/api/mappings'), api('/admin/api/sites'), api('/admin/api/parties'), api('/admin/api/products')
+  ]);
+  const opt = (items) => items.map(i=>`<option value="${i.id}">${i.code}</option>`).join('');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('mappings.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('mappings.site')}</label><select class="pg-select" id="mSite">${opt(sites.items)}</select></div>
+      <div><label class="pg-label">${t('mappings.seller')}</label><select class="pg-select" id="mSeller">${opt(parties.items)}</select></div>
+      <div><label class="pg-label">${t('mappings.buyer')}</label><select class="pg-select" id="mBuyer">${opt(parties.items)}</select></div>
+      <div><label class="pg-label">${t('mappings.product')}</label><select class="pg-select" id="mProduct">${opt(products.items)}</select></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="saveMapping()">${t('mappings.save')}</button>
+    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('mappings.site')}</th><th>${t('mappings.seller')}</th><th>${t('mappings.buyer')}</th><th>${t('mappings.product')}</th></tr></thead>
+    <tbody>${maps.items.map(m=>`<tr><td>${m.site_code}</td><td class="mono">${m.seller_code}</td><td class="mono">${m.buyer_code}</td><td class="mono">${m.product_code}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function users() {
+  const data = await api('/admin/api/auth/users');
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('users.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('login.email')}</label><input class="pg-input" id="uEmail"/></div>
+      <div><label class="pg-label">${t('users.name')}</label><input class="pg-input" id="uName"/></div>
+      <div><label class="pg-label">${t('users.role')}</label><select class="pg-select" id="uRole"><option value="hq">hq</option><option value="viewer">viewer</option></select></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="createUser()">${t('users.add')}</button>
+    <table class="pg-table" style="margin-top:1rem"><thead><tr>
+      <th>${t('login.email')}</th><th>${t('users.name')}</th><th>${t('users.role')}</th><th>OTP</th><th>${t('sites.active')}</th><th></th></tr></thead>
+    <tbody>${data.items.map(u=>`<tr>
+      <td class="mono">${u.email}</td><td>${u.name}</td><td>${u.role}</td><td>${u.totp_enabled}</td><td>${u.active}</td>
+      <td>
+        <button class="pg-btn" style="margin:0" onclick="resetPw('${u.id}')">${t('users.resetPw')}</button>
+        <button class="pg-btn" style="margin:0" onclick="resetOtp('${u.id}')">${t('users.resetOtp')}</button>
+        <button class="pg-btn" style="margin:0" onclick="toggleUser('${u.id}', ${!u.active})">${u.active?t('users.disable'):t('users.enable')}</button>
+      </td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function platform() {
+  const d = await api('/admin/api/platform');
+  const c = d.config;
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('platform.title')}</div><div class="pg-card-body">
+    <div class="pg-section-head" style="font-weight:700;margin-bottom:.5rem">${t('platform.domainSsl')}</div>
+    <div class="pg-row">
+      <div><label class="pg-label">${t('platform.siteName')}</label><input class="pg-input" id="pSiteName" value="${esc(c.siteName)}"/></div>
+      <div><label class="pg-label">${t('platform.domain')}</label><input class="pg-input" id="pDomain" value="${esc(c.publicDomain)}"/></div>
+      <div><label class="pg-label">${t('platform.originIp')}</label><input class="pg-input" id="pOrigin" value="${esc(c.originIp)}"/></div>
+      <div><label class="pg-label">${t('platform.sslPath')}</label><input class="pg-input" id="pSsl" value="${esc(c.sslCertPath)}"/></div>
+    </div>
+    <p class="pg-hint">${t('dash.cf.ssl')}: ${d.ssl.status} / ${d.ssl.detail}</p>
+    <div class="pg-section-head" style="font-weight:700;margin:1rem 0 .5rem">${t('platform.emailOtp')}</div>
+    <div class="pg-row">
+      <div><label class="pg-label">${t('platform.smtpHost')}</label><input class="pg-input" id="pSmtpHost" value="${esc(c.smtpHost)}"/></div>
+      <div><label class="pg-label">${t('platform.smtpPort')}</label><input class="pg-input" id="pSmtpPort" type="number" value="${c.smtpPort}"/></div>
+      <div><label class="pg-label">${t('platform.smtpUser')}</label><input class="pg-input" id="pSmtpUser" value="${esc(c.smtpUser)}"/></div>
+      <div><label class="pg-label">${t('platform.smtpPass')}</label><input class="pg-input" id="pSmtpPass" type="password" value="${esc(c.smtpPassword)}"/></div>
+      <div><label class="pg-label">${t('platform.fromAddress')}</label><input class="pg-input" id="pFrom" value="${esc(c.fromAddress)}"/></div>
+      <div><label class="pg-label">${t('platform.otpExpire')}</label><input class="pg-input" id="pOtpMin" type="number" value="${c.otpExpireMinutes}"/></div>
+      <div><label class="pg-label">${t('platform.sensitiveOtp')}</label><input class="pg-input" id="pSensMin" type="number" value="${c.sensitiveOtpExpireMinutes}"/></div>
+    </div>
+    <label><input type="checkbox" id="pOtpEn" ${c.otpEnabled?'checked':''}/> ${t('platform.otpEnabled')}</label>
+    <label style="margin-left:1rem"><input type="checkbox" id="pEmailOtpEn" ${c.emailOtpEnabled?'checked':''}/> ${t('platform.emailOtpEnabled')}</label>
+    <div class="pg-section-head" style="font-weight:700;margin:1rem 0 .5rem">Cloudflare / Turnstile</div>
+    <div class="pg-row">
+      <div><label class="pg-label">Turnstile Site Key</label><input class="pg-input" id="pTsSite" value="${esc(c.turnstileSiteKey)}"/></div>
+      <div><label class="pg-label">Turnstile Secret</label><input class="pg-input" id="pTsSec" type="password" value="${esc(c.turnstileSecretKey)}"/></div>
+      <div><label class="pg-label">CF API Token</label><input class="pg-input" id="pCfTok" type="password" value="${esc(c.cfApiToken)}"/></div>
+      <div><label class="pg-label">CF Zone ID</label><input class="pg-input" id="pCfZone" value="${esc(c.cfZoneId)}"/></div>
+    </div>
+    <label><input type="checkbox" id="pTsEn" ${c.turnstileEnabled?'checked':''}/> ${t('platform.turnstileEnabled')}</label>
+    <div style="margin-top:.75rem">
+      <button class="pg-btn pg-btn-primary" onclick="savePlatform()">${t('platform.save')}</button>
+      <button class="pg-btn" onclick="testEmail()">${t('platform.testEmail')}</button>
+    </div>
+  </div></div>`;
+}
+
+async function audit() {
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('audit.title')}</div><div class="pg-card-body">
+    <div class="pg-row">
+      <div><label class="pg-label">${t('audit.from')}</label><input class="pg-input" id="aFrom" type="date"/></div>
+      <div><label class="pg-label">${t('audit.to')}</label><input class="pg-input" id="aTo" type="date"/></div>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="exportAudit('json')">${t('audit.exportJson')}</button>
+    <button class="pg-btn" onclick="exportAudit('csv')">${t('audit.exportCsv')}</button>
+  </div></div>`;
+}
+
+function esc(s){ return String(s??'').replace(/"/g,'&quot;'); }
+
+async function createSite(){ await api('/admin/api/sites',{method:'POST',body:JSON.stringify({code:siteCode.value,name:siteName.value,notes:siteNotes.value})}); sites(); }
+async function issueKey(siteId,code){ const d=await api(`/admin/api/sites/${siteId}/keys`,{method:'POST',body:JSON.stringify({label:'default'})}); flash(t('sites.keyIssued',{code,apiKey:d.apiKey,hmacSecret:d.hmacSecret})); listKeys(siteId); }
+async function listKeys(siteId){ const d=await api(`/admin/api/sites/${siteId}/keys`); keysBox.innerHTML=`<table class="pg-table"><thead><tr><th>Prefix</th><th>Label</th><th>${t('sites.active')}</th><th></th></tr></thead><tbody>${d.items.map(k=>`<tr><td class="mono">${k.key_prefix}…</td><td>${k.label}</td><td>${k.active}</td><td>${k.active?`<button class="pg-btn pg-btn-danger" style="margin:0" onclick="revokeKey('${k.id}','${siteId}')">${t('sites.revoke')}</button>`:''}</td></tr>`).join('')}</tbody></table>`; }
+async function revokeKey(id,siteId){ if(!confirm(t('sites.revokeConfirm')))return; await api(`/admin/api/keys/${id}/revoke`,{method:'POST',body:'{}'}); listKeys(siteId); }
+async function createParty(){ await api('/admin/api/parties',{method:'POST',body:JSON.stringify({code:pCode.value,kind:pKind.value,legal_name:pLegal.value,country:pCountry.value})}); parties(); }
+async function createProduct(){ await api('/admin/api/products',{method:'POST',body:JSON.stringify({code:prCode.value,name:prName.value,unit:prUnit.value,default_currency:prCur.value})}); products(); }
+async function saveMapping(){ await api(`/admin/api/mappings/${mSite.value}`,{method:'PUT',body:JSON.stringify({seller_party_id:mSeller.value,buyer_party_id:mBuyer.value,product_id:mProduct.value})}); mappings(); }
+async function reissue(id){ if(!confirm(t('invoices.reissueConfirm')))return; const d=await api(`/admin/api/invoices/${id}/reissue`,{method:'POST',body:'{}'}); flash('→ '+d.invoice.invoiceNo); invoices(); }
+async function createUser(){ const d=await api('/admin/api/auth/users',{method:'POST',body:JSON.stringify({email:uEmail.value,name:uName.value,role:uRole.value})}); flash(t('users.created',{pw:d.temporaryPassword})); users(); }
+async function resetPw(id){ const d=await api(`/admin/api/auth/users/${id}/reset-password`,{method:'POST',body:'{}'}); flash(t('users.pwReset',{pw:d.temporaryPassword})); }
+async function resetOtp(id){ if(!confirm(t('users.resetOtpConfirm')))return; await api(`/admin/api/auth/users/${id}/reset-otp`,{method:'POST',body:'{}'}); users(); }
+async function toggleUser(id,active){ await api(`/admin/api/auth/users/${id}`,{method:'PATCH',body:JSON.stringify({active})}); users(); }
+async function savePlatform(){
+  await api('/admin/api/platform',{method:'PUT',body:JSON.stringify({
+    siteName:pSiteName.value, publicDomain:pDomain.value, originIp:pOrigin.value, sslCertPath:pSsl.value,
+    smtpHost:pSmtpHost.value, smtpPort:Number(pSmtpPort.value), smtpUser:pSmtpUser.value, smtpPassword:pSmtpPass.value,
+    fromAddress:pFrom.value, otpExpireMinutes:Number(pOtpMin.value), sensitiveOtpExpireMinutes:Number(pSensMin.value),
+    otpEnabled:pOtpEn.checked, emailOtpEnabled:pEmailOtpEn.checked,
+    turnstileSiteKey:pTsSite.value, turnstileSecretKey:pTsSec.value, turnstileEnabled:pTsEn.checked,
+    cfApiToken:pCfTok.value, cfZoneId:pCfZone.value
+  })});
+  flash(t('platform.saved')); platform();
+}
+async function testEmail(){ const to=prompt(t('platform.testEmailTo')); if(!to)return; await api('/admin/api/platform/email/test',{method:'POST',body:JSON.stringify({to})}); flash(t('platform.testSent')); }
+function exportAudit(format){ window.open(`/admin/api/audit/export?from=${aFrom.value||'1970-01-01'}&to=${aTo.value||'2999-12-31'}&format=${format}&lang=${LANG}`,'_blank'); }
+
+(async function init(){
+  applyShellTheme();
+  await loadI18n(LANG);
+  publicCfg = await api('/admin/api/auth/public-config');
+  await mountTurnstile();
+  try {
+    const me = await api('/admin/api/auth/me');
+    boot(me.admin);
+  } catch {
+    loginView.classList.remove('hidden');
+    showAuthStep('credForm');
+  }
+})();
+</script>
+</body>
+</html>

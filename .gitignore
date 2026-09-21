@@ -12,3 +12,6 @@ pdfs/
 *.tgz
 invoice-service-deploy.tgz
 .cursor/projects/
+
+tmp/
+

@@ -7,9 +7,10 @@
 5. `pm2 start dist/index.js --name invoice-service && pm2 save && pm2 startup`
 6. Nginx reverse proxy → `127.0.0.1:3100` (`scripts/nginx-invoice.conf`)
 7. `curl http://127.0.0.1:3100/health`
-8. Open `/admin`, login, issue API key for `tinpass`
-9. (Later) HTTPS via certbot when domain is ready
-10. Cron: `15 3 * * * /opt/invoice-service/scripts/backup.sh`
+8. Open `/admin`, login, issue API key for `tinpass` (and `dealmai` for DealMai.com)
+9. DealMai env: set `INVOICE_BASE_URL` / `INVOICE_API_KEY` / `INVOICE_HMAC_SECRET` (see `docs/dealmai-integration.md`)
+10. (Later) HTTPS via certbot when domain is ready
+11. Cron: `15 3 * * * /opt/invoice-service/scripts/backup.sh`
 
 ## Smoke after deploy
 

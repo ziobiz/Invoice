@@ -1,0 +1,9 @@
+-- Site seal / stamp / signature assets for bank-ready invoice PDFs
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_official_path TEXT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_stamp_path TEXT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_signature_path TEXT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS signatory_name TEXT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS signatory_title TEXT DEFAULT 'CEO';
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_use_official BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_use_stamp BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS seal_use_signature BOOLEAN NOT NULL DEFAULT TRUE;

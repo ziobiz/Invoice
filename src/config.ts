@@ -18,5 +18,6 @@ export const config = {
   sessionSecret: required('SESSION_SECRET', 'dev-session-secret-change-me'),
   webhookMaxSkewSeconds: Number(process.env.WEBHOOK_MAX_SKEW_SECONDS ?? 300),
   pdfStorageDir: path.resolve(process.env.PDF_STORAGE_DIR ?? './storage/pdfs'),
+  sealStorageDir: path.resolve(process.env.SEAL_STORAGE_DIR ?? './storage/seals'),
   invoiceTz: process.env.INVOICE_TZ ?? 'Asia/Seoul',
 };

@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice Service</title>
   <!-- BRAND_META -->
-  <link rel="stylesheet" href="/admin/crypto-shell.css" />
+  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260921auditAlign1" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  <script src="/admin/manuals.js?v=20260921auditAlign1"></script>
 </head>
 <body>
   <!-- LOGIN -->
@@ -23,12 +24,9 @@
           <option value="zh">中文</option>
         </select>
       </div>
-      <h1 id="authTitle" data-i18n="login.title">Admin Login</h1>
-      <div id="authLogoWrap" class="hidden" style="text-align:center;margin:.5rem 0 .75rem">
-        <img id="authLogoImg" alt="" style="max-height:48px;max-width:100%;object-fit:contain" />
+      <div id="authLogoWrap" class="auth-logo-wrap hidden">
+        <img id="authLogoImg" alt="" />
       </div>
-      <p class="sub" id="authSub" data-i18n="login.hint">HQ admin session</p>
-      <p class="sub hidden" id="authMainText" style="white-space:pre-wrap"></p>
       <div id="authError" class="auth-error hidden"></div>
 
       <form id="credForm" onsubmit="return handleCredentials(event)">
@@ -92,6 +90,9 @@
         <div id="flash" class="flash hidden"></div>
         <div id="content" class="pg-stack"></div>
       </main>
+      <div class="pg-page-actions" aria-label="page actions">
+        <button type="button" id="helloBtn" class="pg-hello" onclick="toggleHello()" title=""></button>
+      </div>
       <footer id="shellFooter" class="site-footer site-footer-shell"></footer>
     </div>
   </div>
@@ -112,6 +113,7 @@ let userMenuOpen = false;
 let shellTheme = localStorage.getItem('invoice_shell_theme') || 'dark';
 if (!['dark','default','light'].includes(shellTheme)) shellTheme = 'dark';
 let tabletMode = localStorage.getItem('invoice_tablet') === '1';
+let helpOn = localStorage.getItem('invoice_help_on') === '1';
 let navExpanded = {};
 try { navExpanded = JSON.parse(localStorage.getItem('invoice_nav_expanded') || '{}'); } catch { navExpanded = {}; }
 
@@ -138,6 +140,8 @@ const ICO = {
   users: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
   platform: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   audit: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14 2H7a1 1 0 00-1 1v18a1 1 0 001 1h10a1 1 0 001-1V7l-5-5z"/><path d="M14 2v5h5M9 13h6M9 17h6M9 9h2"/></svg>',
+  manuals: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M8 7h8M8 11h8"/></svg>',
+  updates: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>',
   group: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
 };
 
@@ -151,9 +155,11 @@ const NAV = [
   { id:'users', key:'nav.users', icon:'users' },
   { id:'platform', key:'nav.platform', icon:'platform' },
   { id:'audit', key:'nav.audit', icon:'audit' },
+  { id:'manuals', key:'nav.manuals', icon:'manuals' },
+  { id:'updates', key:'nav.updates', icon:'updates' },
 ];
 
-/** ICOCARD식 그룹 메뉴 */
+/** ICOCARD식 그룹 메뉴 — 운영메뉴얼·버전업 히스토리는 시스템과 별도 최상위 */
 const NAV_TREE = [
   { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
   {
@@ -164,6 +170,8 @@ const NAV_TREE = [
     id:'grp-system', key:'nav.group.system', icon:'platform',
     children: ['users','platform','audit'],
   },
+  { id:'manuals', key:'nav.manuals', icon:'manuals' },
+  { id:'updates', key:'nav.updates', icon:'updates' },
 ];
 
 function t(key, vars) {
@@ -187,6 +195,21 @@ function formatAccessTime(date) {
 function applyShellTheme() {
   document.documentElement.setAttribute('data-shell-theme', shellTheme);
   document.documentElement.classList.toggle('tablet-mode', tabletMode);
+  const shell = document.getElementById('appView');
+  if (shell) shell.classList.toggle('is-help-on', helpOn);
+  syncHelloBtn();
+}
+function syncHelloBtn() {
+  const btn = document.getElementById('helloBtn');
+  if (!btn) return;
+  btn.textContent = t('hello.label');
+  btn.title = t('hello.hint');
+  btn.classList.toggle('on', helpOn);
+}
+function toggleHello() {
+  helpOn = !helpOn;
+  localStorage.setItem('invoice_help_on', helpOn ? '1' : '0');
+  applyShellTheme();
 }
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
@@ -197,7 +220,7 @@ function applyI18n() {
   applyBranding();
 }
 async function loadI18n(lang) {
-  I18N = await (await fetch('/locales/'+lang+'.json')).json();
+  I18N = await (await fetch('/locales/'+lang+'.json?v=20260921auditAlign1')).json();
   LANG = lang; localStorage.setItem('invoice_lang', lang); applyI18n();
 }
 async function setLang(lang) {
@@ -710,7 +733,7 @@ async function showTab(id) {
   activeTab = id;
   if (!openTabs.includes(id)) openTabs.push(id);
   renderShell();
-  const loaders = { dashboard, invoices, sites, parties, products, mappings, users, platform, audit };
+  const loaders = { dashboard, invoices, sites, parties, products, mappings, users, platform, audit, manuals, updates };
   await loaders[id]?.();
 }
 
@@ -721,157 +744,1837 @@ function flash(msg) {
 
 async function dashboard() {
   const d = await api('/admin/api/platform/dashboard');
+  const fmtUptime = (sec) => {
+    const s = Number(sec) || 0;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+  const amountsLine = (list) => {
+    if (!list || !list.length) return '—';
+    return list.map((a) => `${fmtMoney(a.amount, a.currency)} ${escHtml(a.currency)} (${a.count})`).join(' · ');
+  };
+  const statusLabelDash = (st) => t(`invoices.status.${st}`) || st;
   content.innerHTML = `
-    <p class="pg-hint">${d.siteName} · ${d.publicDomain}</p>
-    <div class="pg-card">
-      <div class="pg-card-head">${t('dash.cf.title')}</div>
-      <div class="pg-card-body">
-        <div class="pg-row">
-          <div><div class="pg-label">${t('dash.cf.origin')}</div><div class="mono">${d.originIp}</div></div>
-          <div><div class="pg-label">${t('dash.cf.domain')}</div><div class="mono">${d.publicDomain}</div></div>
-          <div><div class="pg-label">${t('dash.cf.ssl')}</div><div>${d.ssl.status} · ${d.ssl.daysRemaining ?? '-'}d</div></div>
+    <p class="pg-hint">${escHtml(d.siteName)} · ${escHtml(d.publicDomain)}</p>
+    <div class="pg-stat-grid">
+      <div class="pg-stat"><div class="l">${t('dash.stat.issued')}</div><div class="v">${d.stats.issued ?? 0}</div></div>
+      <div class="pg-stat"><div class="l">${t('dash.stat.reissued')}</div><div class="v">${d.stats.reissued ?? 0}</div></div>
+      <div class="pg-stat"><div class="l">${t('dash.stat.void')}</div><div class="v">${d.stats.void ?? 0}</div></div>
+      <div class="pg-stat"><div class="l">${t('dash.stat.sites')}</div><div class="v">${d.stats.activeSites}</div></div>
+      <div class="pg-stat"><div class="l">${t('dash.stat.amount')}</div><div class="v dash-stat-amount">${amountsLine(d.stats.amounts)}</div></div>
+      <div class="pg-stat"><div class="l">OTP / Turnstile</div><div class="v" style="font-size:14px">${d.otpEnabled?'ON':'OFF'} / ${d.turnstileEnabled?'ON':'OFF'}</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="pg-card">
+        <div class="pg-card-head">${t('dash.sites.title')}</div>
+        <div class="pg-card-body" style="padding-top:.35rem">
+          <p class="pg-card-hint">${t('dash.sites.hint')}</p>
+          <table class="pg-table dash-table"><thead><tr>
+            <th>${t('dash.sites.site')}</th>
+            <th>${t('dash.sites.issued')}</th>
+            <th>${t('dash.sites.amount')}</th>
+            <th>${t('dash.sites.last')}</th>
+            <th>${t('sites.active')}</th>
+          </tr></thead>
+          <tbody>${(d.sites||[]).map((s) => `<tr>
+            <td><span class="mono">${escHtml(s.code)}</span><div class="dash-sub">${escHtml(s.name)}</div></td>
+            <td class="mono">${s.issuedCount}${s.reissuedCount ? ` <span class="muted">(+${s.reissuedCount})</span>` : ''}</td>
+            <td class="mono">${amountsLine(s.amounts)}</td>
+            <td class="mono">${fmtIssued(s.lastIssuedAt)}</td>
+            <td>${s.active ? '✓' : '—'}</td>
+          </tr>`).join('') || `<tr><td colspan="5">${t('dash.sites.empty')}</td></tr>`}</tbody></table>
         </div>
-        <ul class="pg-check" style="margin-top:.75rem">
-          ${d.checklist.map(c => `<li><span class="${c.done?'ok':'no'}">${c.done?'✓':'!'}</span> ${t(c.labelKey)}</li>`).join('')}
-        </ul>
-        <p class="pg-hint" style="margin-top:.75rem">${t('dash.cf.howto')}</p>
-        <ol style="margin:.25rem 0 0;padding-left:1.1rem;font-size:12px;line-height:1.6">
-          <li>${t('dash.cf.step1')}</li>
-          <li>${t('dash.cf.step2')}</li>
-          <li>${t('dash.cf.step3')}</li>
-          <li>${t('dash.cf.step4')}</li>
-          <li>${t('dash.cf.step5')}</li>
-        </ol>
-        ${d.cloudflare.configured ? `<pre class="mono" style="margin-top:.75rem;background:#f8f9fa;padding:.5rem;overflow:auto">${JSON.stringify(d.cloudflare.records||d.cloudflare.error,null,2)}</pre>` : `<p class="pg-hint">${t('dash.cf.noToken')}</p>`}
+      </div>
+
+      <div class="pg-card">
+        <div class="pg-card-head">${t('dash.server.title')}</div>
+        <div class="pg-card-body">
+          <div class="dash-kv">
+            <div><span class="k">${t('dash.server.status')}</span><span class="v mono">${d.server?.ok ? 'OK' : '—'}</span></div>
+            <div><span class="k">${t('dash.server.uptime')}</span><span class="v mono">${fmtUptime(d.server?.uptimeSec)}</span></div>
+            <div><span class="k">${t('dash.server.memory')}</span><span class="v mono">${d.server?.memoryMb ?? '—'} MB</span></div>
+            <div><span class="k">${t('dash.server.node')}</span><span class="v mono">${escHtml(d.server?.node)}</span></div>
+            <div><span class="k">${t('dash.server.env')}</span><span class="v mono">${escHtml(d.server?.env)}</span></div>
+            <div><span class="k">${t('dash.server.host')}</span><span class="v mono">${escHtml(d.server?.host)}</span></div>
+            <div><span class="k">${t('dash.server.url')}</span><span class="v mono">${escHtml(d.server?.publicBaseUrl)}</span></div>
+            <div><span class="k">${t('dash.server.port')}</span><span class="v mono">${escHtml(d.server?.port)}</span></div>
+            <div><span class="k">${t('dash.server.tz')}</span><span class="v mono">${escHtml(d.server?.invoiceTz)}</span></div>
+            <div><span class="k">${t('dash.server.pdf')}</span><span class="v mono">${escHtml(d.server?.pdfStorageDir)}</span></div>
+            <div><span class="k">${t('dash.server.locales')}</span><span class="v mono">${escHtml((d.server?.locales||[]).join(', '))}</span></div>
+            <div><span class="k">${t('dash.cf.origin')}</span><span class="v mono">${escHtml(d.originIp)}</span></div>
+            <div><span class="k">${t('dash.cf.ssl')}</span><span class="v mono">${escHtml(d.ssl?.status)} · ${d.ssl?.daysRemaining ?? '-'}d</span></div>
+            <div><span class="k">SMTP</span><span class="v mono">${d.smtpConfigured ? 'ON' : 'OFF'}</span></div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="pg-stat-grid">
-      <div class="pg-stat"><div class="l">${t('nav.invoices')}</div><div class="v">${d.stats.invoices}</div></div>
-      <div class="pg-stat"><div class="l">${t('nav.sites')}</div><div class="v">${d.stats.activeSites}</div></div>
-      <div class="pg-stat"><div class="l">OTP</div><div class="v">${d.otpEnabled?'ON':'OFF'}</div></div>
-      <div class="pg-stat"><div class="l">Turnstile</div><div class="v">${d.turnstileEnabled?'ON':'OFF'}</div></div>
+
+    <div class="pg-card" style="margin-top:.75rem">
+      <div class="pg-card-head">${t('dash.recent.title')}</div>
+      <div class="pg-card-body" style="padding-top:.35rem">
+        <table class="pg-table dash-table"><thead><tr>
+          <th>${t('invoices.col.issued')}</th>
+          <th>${t('invoices.col.no')}</th>
+          <th>${t('invoices.col.site')}</th>
+          <th>${t('invoices.tag.buyer')}</th>
+          <th>${t('invoices.tag.seller')}</th>
+          <th>${t('invoices.col.amount')}</th>
+          <th>${t('invoices.col.status')}</th>
+        </tr></thead>
+        <tbody>${(d.recent||[]).map((r) => `<tr class="dash-row-click" onclick="showTab('invoices')">
+          <td class="mono">${fmtIssued(r.issuedAt)}</td>
+          <td class="mono">${escHtml(r.invoiceNo)}</td>
+          <td class="mono">${escHtml(r.siteCode)}</td>
+          <td class="mono">${escHtml(r.buyerCode || '—')}</td>
+          <td class="mono">${escHtml(r.sellerCode || '—')}</td>
+          <td class="mono">${fmtMoney(r.amount, r.currency)} ${escHtml(fmtCurrency(r.currency))}</td>
+          <td>${escHtml(statusLabelDash(r.status))}</td>
+        </tr>`).join('') || `<tr><td colspan="7">${t('dash.recent.empty')}</td></tr>`}</tbody></table>
+      </div>
+    </div>
+
+    <div class="pg-card" style="margin-top:.75rem">
+      <div class="pg-card-head">${t('dash.cf.title')}</div>
+      <div class="pg-card-body">
+        <ul class="pg-check">
+          ${(d.checklist||[]).map((c) => `<li><span class="${c.done?'ok':'no'}">${c.done?'✓':'!'}</span> ${t(c.labelKey)}</li>`).join('')}
+        </ul>
+        <p class="pg-card-hint" style="margin-top:.5rem">${t('dash.cf.howto')}</p>
+      </div>
     </div>`;
 }
 
-let invoiceKindFilter = 'live';
+let invoiceKindFilter = 'all';
+let invoiceSiteFilter = '';
+let invoiceFrom = '';
+let invoiceTo = '';
+let invoiceQField = '';
+let invoiceQ = '';
+let invoicePdfLang = 'en';
 
-async function invoices() {
-  const data = await api(`/admin/api/invoices?limit=100&kind=${encodeURIComponent(invoiceKindFilter)}`);
-  const tab = (id, label) =>
-    `<button type="button" class="pg-btn ${invoiceKindFilter===id?'pg-btn-primary':''}" style="margin:0 .25rem .5rem 0;padding:.25rem .6rem" onclick="setInvoiceKindFilter('${id}')">${label}</button>`;
-  const kindBadge = (i) => {
-    if (i.invoice_kind === 'simulator' || i.is_simulator) {
-      return `<span class="pg-badge" style="background:#e0e7ff;color:#3730a3">${t('invoices.badge.simulator')}</span>`;
-    }
-    if (i.invoice_kind === 'sandbox' || i.is_sandbox) {
-      return `<span class="pg-badge" style="background:#fef3c7;color:#92400e">${t('invoices.badge.sandbox')}</span>`;
-    }
-    return t('invoices.badge.live');
-  };
-  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('invoices.title')}</div><div class="pg-card-body">
-    <div>
-      ${tab('live', t('invoices.filter.live'))}
-      ${tab('simulator', t('invoices.filter.simulator'))}
-      ${tab('sandbox', t('invoices.filter.sandbox'))}
-      ${tab('all', t('invoices.filter.all'))}
-    </div>
-    <table class="pg-table"><thead><tr>
-      <th>${t('invoices.col.no')}</th><th>${t('invoices.col.site')}</th><th>${t('invoices.col.kind')}</th><th>${t('invoices.col.status')}</th>
-      <th>${t('invoices.col.amount')}</th><th>${t('invoices.col.tx')}</th><th></th></tr></thead>
-    <tbody>${data.items.map(i=>`<tr>
-      <td class="mono">${i.invoice_no}</td><td>${i.site_code}</td>
-      <td>${kindBadge(i)}</td>
-      <td>${i.status}</td>
-      <td class="mono">${i.amount} ${i.currency}</td><td class="mono">${i.source_transaction_id}</td>
-      <td><a href="/admin/api/invoices/${i.id}/pdf" target="_blank">${t('invoices.pdf')}</a>
-      · <button class="pg-btn" style="margin:0;padding:.15rem .4rem" onclick="reissue('${i.id}')">${t('invoices.reissue')}</button></td>
-    </tr>`).join('') || `<tr><td colspan="7">${t('invoices.empty')}</td></tr>`}</tbody></table></div></div>`;
+function escHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
 }
 
-function setInvoiceKindFilter(id) {
-  invoiceKindFilter = id;
+function fmtMoney(amount, currency) {
+  const n = Number(amount);
+  const cur = String(currency || '').toUpperCase();
+  const noFraction = cur === 'JPY' || cur === 'KRW';
+  const digits = noFraction ? 0 : 2;
+  if (!Number.isFinite(n)) return String(amount ?? '');
+  return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function fmtCurrency(currency) {
+  const cur = String(currency || '').toUpperCase();
+  return cur || '—';
+}
+
+function fmtIssued(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function invoiceKindOf(row) {
+  if (row.invoice_kind === 'simulator' || row.is_simulator) return 'simulator';
+  if (row.invoice_kind === 'sandbox' || row.is_sandbox) return 'sandbox';
+  return 'live';
+}
+
+async function manuals() {
+  const M = window.InvoiceManuals;
+  if (!M) {
+    content.innerHTML = `<p class="pg-hint">${escHtml(t('manual.loadFailed'))}</p>`;
+    return;
+  }
+  const items = M.MANUAL_CATALOG || [];
+  const brand = {
+    siteName: (publicCfg && publicCfg.siteName) || t('app.brand'),
+    logoUrl: (document.getElementById('authLogoImg') && document.getElementById('authLogoImg').src)
+      || (document.getElementById('shellLogoImg') && document.getElementById('shellLogoImg').src)
+      || '',
+    footerText: '',
+  };
+  content.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:1rem">
+      <div>
+        <h1 style="font-size:15px;font-weight:700;margin:0">${escHtml(t('manual.title'))}</h1>
+        <p class="pg-hint" style="margin:.35rem 0 0">${escHtml(t('manual.desc'))}</p>
+      </div>
+      <span style="border-radius:999px;background:#eff6ff;color:#1e40af;font-size:12px;font-weight:700;padding:.35rem .75rem">
+        ${escHtml(t('manual.liveVersion', { version: M.CURRENT_LIVE_VERSION }))}
+      </span>
+    </div>
+    <div id="manualFlash" class="auth-error hidden" style="margin-bottom:.75rem"></div>
+    <div class="pg-card">
+      <div class="pg-card-head">${escHtml(t('manual.audience.hq'))}</div>
+      <div>
+        ${items.map((row) => `
+          <button type="button" class="manual-row" data-manual-id="${escHtml(row.id)}" data-manual-ver="${escHtml(row.docVersion)}"
+            style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:.75rem;padding:.85rem 1rem;text-align:left;border:0;border-bottom:1px solid var(--pg-border,#e5e7eb);background:transparent;cursor:pointer">
+            <span style="font-size:13px;font-weight:600">${escHtml(t(row.titleKey))}</span>
+            <span style="flex-shrink:0;border-radius:4px;background:#f1f5f9;color:#334155;font-size:11px;font-weight:700;padding:.2rem .45rem">V${escHtml(row.docVersion)}</span>
+          </button>`).join('') || `<p class="pg-hint" style="padding:1rem">${escHtml(t('manual.empty'))}</p>`}
+      </div>
+    </div>
+    <p class="pg-hint" style="margin-top:.85rem">${escHtml(t('manual.openHint'))}</p>
+  `;
+  content.querySelectorAll('[data-manual-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const flash = document.getElementById('manualFlash');
+      try {
+        if (flash) { flash.classList.add('hidden'); flash.textContent = ''; }
+        const win = M.openManualPlaceholderWindow();
+        const html = M.buildManualHtml(btn.getAttribute('data-manual-id'), LANG, brand, btn.getAttribute('data-manual-ver'));
+        M.openManualWindow(html, win);
+      } catch (e) {
+        if (flash) {
+          flash.textContent = t('manual.popupBlocked');
+          flash.classList.remove('hidden');
+        }
+      }
+    });
+  });
+}
+
+async function updates() {
+  const M = window.InvoiceManuals;
+  if (!M || !Array.isArray(M.RELEASE_NOTES)) {
+    content.innerHTML = `<p class="pg-hint">${escHtml(t('manual.loadFailed'))}</p>`;
+    return;
+  }
+  const lang = String(LANG || 'en').slice(0, 2).toLowerCase();
+  const notes = M.RELEASE_NOTES;
+  content.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.85rem;padding:.85rem 1rem;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.7)">
+      <div>
+        <h1 style="font-size:15px;font-weight:700;margin:0">${escHtml(t('updates.title'))}</h1>
+        <p class="pg-hint" style="margin:.35rem 0 0">${escHtml(t('updates.desc'))}</p>
+      </div>
+      <span style="border-radius:999px;background:#fff;color:#1e40af;font-size:12px;font-weight:700;padding:.35rem .75rem;box-shadow:0 1px 2px rgba(0,0,0,.06)">
+        ${escHtml(t('manual.liveVersion', { version: M.CURRENT_LIVE_VERSION }))}
+      </span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem;font-size:12px;color:var(--pg-muted,#64748b)">
+      <span style="border:1px solid #fde68a;background:#fffbeb;border-radius:6px;padding:.25rem .55rem">${escHtml(t('updates.majorRule'))}</span>
+      <span style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:.25rem .55rem">${escHtml(t('updates.minorRule'))}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.75rem">
+      ${notes.map((rel) => {
+        const items = (rel.items && (rel.items[lang] || rel.items.ko || rel.items.en)) || [];
+        const isMajor = rel.kind === 'major';
+        const kindLabel = isMajor ? t('updates.kind.major') : t('updates.kind.minor');
+        const kindStyle = isMajor
+          ? 'background:#fef3c7;color:#92400e'
+          : 'background:#e2e8f0;color:#334155';
+        return `<article class="pg-card" style="overflow:hidden;margin:0">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.65rem 1rem;border-bottom:1px solid var(--pg-border,#e5e7eb);background:rgba(248,250,252,.85)">
+            <span style="border-radius:4px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;padding:.15rem .45rem">V${escHtml(rel.version)}</span>
+            <span style="border-radius:4px;font-size:11px;font-weight:600;padding:.15rem .45rem;${kindStyle}">${escHtml(kindLabel)}</span>
+            <span style="font-size:11px;color:var(--pg-muted,#64748b)">${escHtml(rel.date)}</span>
+          </div>
+          <ul style="margin:0;padding:.75rem 1rem .9rem 1.4rem;font-size:13px;line-height:1.55">
+            ${items.map((line) => `<li style="margin-bottom:.35rem">${escHtml(line)}</li>`).join('') || `<li>${escHtml(t('updates.empty'))}</li>`}
+          </ul>
+        </article>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+async function invoices() {
+  const qParams = new URLSearchParams({
+    limit: '100',
+    kind: invoiceKindFilter,
+    site: invoiceSiteFilter,
+    from: invoiceFrom,
+    to: invoiceTo,
+  });
+  if (invoiceQField && invoiceQ) {
+    qParams.set('qField', invoiceQField);
+    qParams.set('q', invoiceQ);
+  }
+  const [data, sites] = await Promise.all([
+    api(`/admin/api/invoices?${qParams.toString()}`),
+    api('/admin/api/sites'),
+  ]);
+  const kindBadge = (row) => {
+    const kind = invoiceKindOf(row);
+    return `<span class="inv-kind inv-kind-${kind}">${t('invoices.badge.'+kind)}</span>`;
+  };
+  const statusLabel = (status, deletedAt) => {
+    if (status === 'void' || deletedAt) return t('invoices.status.void');
+    return t('invoices.status.'+status) || status;
+  };
+  /** Display status for list: 정상 / 수정 / 재생성 / 재발급 / 삭제 */
+  const displayStatus = (row) => {
+    if (row.status === 'void' || row.deleted_at) {
+      return { key: 'void', cls: 'inv-status-deleted' };
+    }
+    if (row.status === 'reissued' || row.reissued_from_id) {
+      return { key: 'reissued', cls: 'inv-status-reissued' };
+    }
+    const issued = row.issued_at ? new Date(row.issued_at).getTime() : 0;
+    const editedAt = row.content_edited_at ? new Date(row.content_edited_at).getTime() : 0;
+    const regenAt = row.pdf_regenerated_at ? new Date(row.pdf_regenerated_at).getTime() : 0;
+    if (editedAt && editedAt > issued + 1000) {
+      return { key: 'edited', cls: 'inv-status-edited' };
+    }
+    if (regenAt && regenAt > issued + 1000) {
+      return { key: 'regenerated', cls: 'inv-status-regenerated' };
+    }
+    return { key: 'normal', cls: 'inv-status-normal' };
+  };
+  const statusHtml = (row) => {
+    const d = displayStatus(row);
+    return `<span class="${d.cls}">${escHtml(t('invoices.status.' + d.key))}</span>`;
+  };
+  const actorLabel = (i) => {
+    const alias = (i.last_actor_alias || '').trim();
+    const email = (i.last_actor_email || '').trim();
+    const name = (i.last_actor_name || '').trim();
+    if (alias) return escHtml(alias);
+    if (email) return escHtml(email);
+    if (name) return escHtml(name);
+    // Webhook / site API issue — no admin actor
+    if (i.created_by === 'api' || i.created_by === 'system') {
+      return escHtml(t('invoices.user.api'));
+    }
+    return '—';
+  };
+  const ticketLabel = (row) => {
+    const ticket = String(row.ticket_no || '');
+    if (ticket && !ticket.startsWith('SIM-')) return escHtml(ticket);
+    if (invoiceKindOf(row) === 'simulator') return t('invoices.badge.simulator');
+    return '—';
+  };
+  const siteOptions = [`<option value="">${t('invoices.filter.siteAll')}</option>`]
+    .concat((sites.items || []).map((s) => `<option value="${escHtml(s.code)}" ${invoiceSiteFilter===s.code?'selected':''}>${escHtml(s.name || s.code)} (${escHtml(s.code)})</option>`))
+    .join('');
+  const kindOptions = [
+    ['all', 'invoices.filter.all'],
+    ['live', 'invoices.filter.live'],
+    ['simulator', 'invoices.filter.simulator'],
+    ['sandbox', 'invoices.filter.sandbox'],
+  ].map(([v, key]) => `<option value="${v}" ${invoiceKindFilter===v?'selected':''}>${t(key)}</option>`).join('');
+  const pdfLangOptions = [
+    ['en', 'invoices.pdfLang.en'],
+    ['ko', 'invoices.pdfLang.ko'],
+    ['ja', 'invoices.pdfLang.ja'],
+    ['th', 'invoices.pdfLang.th'],
+    ['zh', 'invoices.pdfLang.zh'],
+  ].map(([v, key]) => `<option value="${v}" ${invoicePdfLang===v?'selected':''}>${t(key)}</option>`).join('');
+  const qFieldOptions = [
+    ['', 'invoices.filter.qFieldNone'],
+    ['all', 'invoices.filter.qField.all'],
+    ['ticket', 'invoices.filter.qField.ticket'],
+    ['amount', 'invoices.filter.qField.amount'],
+    ['status', 'invoices.filter.qField.status'],
+    ['site', 'invoices.filter.qField.site'],
+    ['invoice_no', 'invoices.filter.qField.invoiceNo'],
+  ].map(([v, key]) => `<option value="${v}" ${invoiceQField===v?'selected':''}>${t(key)}</option>`).join('');
+  const qEnabled = !!invoiceQField;
+  const manageMenu = (id, status) => {
+    const reissueCls =
+      status === 'reissued' ? 'pg-btn-reissue-done' : status === 'issued' ? 'pg-btn-reissue-fresh' : '';
+    return `<div class="inv-manage-flat">
+      <button type="button" class="pg-btn" onclick="previewInvoicePdf('${id}')">${t('invoices.preview')}</button>
+      <button type="button" class="pg-btn" onclick="editInvoice('${id}')">${t('invoices.edit')}</button>
+      <button type="button" class="pg-btn" onclick="downloadInvoicePdf('${id}')">${t('invoices.pdfDownload')}</button>
+      <button type="button" class="pg-btn" onclick="regenerateInvoicePdf('${id}')">${t('invoices.regeneratePdf')}</button>
+      <button type="button" class="pg-btn ${reissueCls}" onclick="reissueInvoice('${id}')">${t('invoices.reissue')}</button>
+      <button type="button" class="pg-btn pg-btn-danger" onclick="deleteInvoice('${id}')">${t('invoices.delete')}</button>
+    </div>`;
+  };
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('invoices.title')}</div><div class="pg-card-body">
+    <p class="pg-card-hint">${t('invoices.hint')}</p>
+    <div class="inv-search">
+      <label>${t('invoices.filter.site')}<select class="pg-select" id="invSite">${siteOptions}</select></label>
+      <label>${t('invoices.filter.kind')}<select class="pg-select" id="invKind">${kindOptions}</select></label>
+      <label>${t('invoices.filter.qField')}<select class="pg-select" id="invQField" onchange="onInvoiceQFieldChange()">${qFieldOptions}</select></label>
+      <label>${t('invoices.filter.q')}<input class="pg-input inv-q" id="invQ" type="text" value="${escHtml(invoiceQ)}" placeholder="${escHtml(t('invoices.filter.qPlaceholder'))}" ${qEnabled?'':'disabled'}/></label>
+      <label>${t('invoices.filter.from')}<input class="pg-input" id="invFrom" type="date" value="${escHtml(invoiceFrom)}"/></label>
+      <label>${t('invoices.filter.to')}<input class="pg-input" id="invTo" type="date" value="${escHtml(invoiceTo)}"/></label>
+      <label>${t('invoices.pdfLang')}<select class="pg-select" id="invPdfLang">${pdfLangOptions}</select></label>
+      <button class="pg-btn pg-btn-primary" type="button" onclick="applyInvoiceSearch()">${t('invoices.filter.search')}</button>
+    </div>
+    <table class="pg-table inv-table"><thead><tr>
+      <th>${t('invoices.col.issued')}</th>
+      <th>${t('invoices.col.no')}</th>
+      <th>${t('invoices.col.site')}</th>
+      <th>${t('invoices.tag.buyer')}</th>
+      <th>${t('invoices.tag.seller')}</th>
+      <th>${t('invoices.col.kind')}</th>
+      <th>${t('invoices.col.ticket')}</th>
+      <th>${t('invoices.col.currency')}</th>
+      <th>${t('invoices.col.amount')}</th>
+      <th>${t('invoices.col.status')}</th>
+      <th>${t('invoices.col.eventAt')}</th>
+      <th>${t('invoices.col.event')}</th>
+      <th>${t('invoices.col.user')}</th>
+      <th class="inv-col-manage">${t('invoices.col.manage')}</th>
+    </tr></thead>
+    <tbody>${data.items.map(i=>{
+      const deleted = i.status === 'void' || !!i.deleted_at;
+      const rowClass = [
+        'inv-row',
+        deleted ? 'inv-row-deleted' : '',
+      ].filter(Boolean).join(' ');
+      return `<tr class="${rowClass}" data-inv-id="${i.id}" data-status="${escHtml(i.status||'')}" ondblclick="onInvoiceRowDbl(event,'${i.id}')">
+      <td>${fmtIssued(i.issued_at)}</td>
+      <td class="mono">${escHtml(i.invoice_no)}</td>
+      <td>${escHtml(i.site_code)}</td>
+      <td class="mono inv-party-code">${escHtml(i.buyer_code || '—')}</td>
+      <td class="mono inv-party-code">${escHtml(i.seller_code || '—')}</td>
+      <td>${kindBadge(i)}</td>
+      <td>${ticketLabel(i)}</td>
+      <td class="mono">${escHtml(fmtCurrency(i.currency))}</td>
+      <td class="mono">${fmtMoney(i.amount, i.currency)}</td>
+      <td>${statusHtml(i)}</td>
+      <td class="mono">${fmtEventAt(i)}</td>
+      <td>${fmtEventKind(i)}</td>
+      <td class="mono">${actorLabel(i)}</td>
+      <td class="inv-col-manage">${deleted ? '—' : manageMenu(i.id, i.status)}</td>
+    </tr>`;
+    }).join('') || `<tr><td colspan="14">${t('invoices.empty')}</td></tr>`}</tbody></table>
+  </div></div>`;
+}
+
+function eventInfo(row) {
+  const deletedAt = row.deleted_at ? new Date(row.deleted_at).getTime() : 0;
+  if (row.status === 'void' || deletedAt) {
+    return { at: row.deleted_at || row.updated_at, kind: 'delete' };
+  }
+  const issued = row.issued_at ? new Date(row.issued_at).getTime() : 0;
+  const editedAt = row.content_edited_at ? new Date(row.content_edited_at).getTime() : 0;
+  const regen = row.pdf_regenerated_at ? new Date(row.pdf_regenerated_at).getTime() : 0;
+  if (editedAt && editedAt > issued + 1000) {
+    return { at: row.content_edited_at, kind: 'edit' };
+  }
+  if (regen && regen > issued + 1000) {
+    return { at: row.pdf_regenerated_at, kind: 'regen' };
+  }
+  return null;
+}
+
+function fmtEventAt(row) {
+  const info = eventInfo(row);
+  return info?.at ? fmtIssued(info.at) : '—';
+}
+
+function fmtEventKind(row) {
+  const info = eventInfo(row);
+  if (!info) return '—';
+  if (info.kind === 'delete') return `<span class="touch-delete">${t('invoices.event.delete')}</span>`;
+  if (info.kind === 'regen') return `<span class="touch-regen">${t('invoices.event.regen')}</span>`;
+  return `<span class="touch-edit">${t('invoices.event.edit')}</span>`;
+}
+
+function pdfLangParam() {
+  return encodeURIComponent(document.getElementById('invPdfLang')?.value || invoicePdfLang || 'en');
+}
+
+function previewInvoicePdf(id) {
+  window.open(`/admin/api/invoices/${id}/pdf?inline=1&pdfLang=${pdfLangParam()}`, '_blank', 'noopener,width=960,height=720');
+}
+
+function downloadInvoicePdf(id) {
+  window.open(`/admin/api/invoices/${id}/pdf?pdfLang=${pdfLangParam()}`, '_blank', 'noopener');
+}
+
+async function regenerateInvoicePdf(id) {
+  const lang = document.getElementById('invPdfLang')?.value || invoicePdfLang || 'en';
+  await api(`/admin/api/invoices/${id}/regenerate-pdf?pdfLang=${encodeURIComponent(lang)}`, {
+    method: 'POST',
+    body: JSON.stringify({ pdfLang: lang }),
+  });
+  flash(t('invoices.regenerateOk'));
   invoices();
+}
+
+async function deleteInvoice(id) {
+  if (!confirm(t('invoices.deleteConfirm'))) return;
+  await api(`/admin/api/invoices/${id}`, { method: 'DELETE', body: '{}' });
+  flash(t('invoices.deleteOk'));
+  invoices();
+}
+
+async function onInvoiceRowDbl(ev, id) {
+  if (ev.target.closest('button, a, input, select, textarea, .inv-col-manage')) return;
+  const tr = ev.currentTarget;
+  const st = tr?.dataset?.status || '';
+  if (tr && (tr.classList.contains('inv-row-deleted') || st === 'reissued' || st === 'void')) return;
+  editInvoice(id);
+}
+
+function closeInvoiceEdit() {
+  document.querySelectorAll('.inv-edit-row').forEach((el) => el.remove());
+}
+
+async function editInvoice(id) {
+  closeInvoiceEdit();
+  const tr = document.querySelector(`tr.inv-row[data-inv-id="${id}"]`);
+  if (!tr || tr.classList.contains('inv-row-deleted')) return;
+  const d = await api(`/admin/api/invoices/${id}`);
+  const inv = d.invoice;
+  const buyer = inv.buyer_snapshot || {};
+  const seller = inv.seller_snapshot || {};
+  const product = inv.product_snapshot || {};
+  const locked = (label, value) =>
+    `<div><label class="pg-label">${label}</label>
+      <input class="pg-input" value="${escHtml(value ?? '')}" disabled/></div>`;
+  const editRow = document.createElement('tr');
+  editRow.className = 'inv-edit-row';
+  editRow.innerHTML = `<td colspan="14">
+    <div class="inv-edit-panel">
+      <h3>${t('invoices.edit')} · <span class="mono">${escHtml(inv.invoice_no)}</span>
+        <span class="pg-card-hint" style="display:inline;margin-left:.5rem;font-weight:400">${t('invoices.editHint')}</span>
+      </h3>
+      <div class="pg-label" style="margin:.35rem 0">${t('invoices.editLocked')}</div>
+      <div class="pg-row">
+        ${locked(t('invoices.col.no'), inv.invoice_no)}
+        ${locked(t('invoices.col.site'), inv.site_code)}
+        ${locked(t('invoices.col.currency'), inv.currency)}
+        ${locked(t('invoices.col.amount'), fmtMoney(inv.amount, inv.currency))}
+      </div>
+      <div class="pg-row">
+        ${locked(t('invoices.col.buyer'), `${buyer.code || ''} — ${buyer.legal_name || ''}`)}
+        ${locked(t('invoices.tag.seller'), `${seller.code || ''} — ${seller.legal_name || ''}`)}
+      </div>
+      <div class="pg-label" style="margin:.75rem 0 .35rem">${t('invoices.editEditable')}</div>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('invoices.col.ticket')}</label>
+          <input class="pg-input" id="editTicket" value="${escHtml(inv.ticket_no || '')}"/></div>
+        <div><label class="pg-label">${t('invoices.editBuyerRef')}</label>
+          <input class="pg-input" id="editBuyerRef" value="${escHtml(inv.buyer_ref || '')}"/></div>
+        <div><label class="pg-label">${t('invoices.editAsset')}</label>
+          <input class="pg-input" id="editAsset" value="${escHtml(inv.asset || '')}"/></div>
+        <div><label class="pg-label">${t('invoices.editAssetAmount')}</label>
+          <input class="pg-input" id="editAssetAmount" value="${escHtml(inv.asset_amount != null ? inv.asset_amount : '')}"/></div>
+      </div>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('products.name')}</label>
+          <input class="pg-input" id="editProdName" value="${escHtml(product.name || '')}"/></div>
+        <div><label class="pg-label">${t('products.code')}</label>
+          <input class="pg-input" id="editProdCode" value="${escHtml(product.code || '')}"/></div>
+        <div><label class="pg-label">${t('products.unit')}</label>
+          <input class="pg-input" id="editProdUnit" value="${escHtml(product.unit || '')}"/></div>
+        <div><label class="pg-label">${t('products.remark')}</label>
+          <input class="pg-input" id="editProdRemark" value="${escHtml(product.remark || '')}"/></div>
+      </div>
+      <div style="margin-top:.5rem"><label class="pg-label">${t('products.description')}</label>
+        <textarea class="pg-input" id="editProdDesc" rows="2">${escHtml(product.description || '')}</textarea></div>
+      <div style="margin-top:.5rem"><label class="pg-label">${t('invoices.editMemo')}</label>
+        <textarea class="pg-input" id="editMemo" rows="2">${escHtml(inv.memo || '')}</textarea></div>
+      <div class="pg-row" style="margin-top:.75rem;align-items:flex-end">
+        <div><label class="pg-label">${t('users.otp')}</label>
+          <input class="pg-input" id="editInvOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"/></div>
+        <button class="pg-btn" type="button" onclick="requestInvoiceEditOtp()">${t('users.sendOtp')}</button>
+        <button class="pg-btn pg-btn-primary" type="button" onclick="saveInvoiceEdit('${id}')">${t('invoices.saveEdit')}</button>
+        <button class="pg-btn" type="button" onclick="closeInvoiceEdit()">${t('invoices.cancelEdit')}</button>
+      </div>
+      <p class="pg-card-hint" style="margin-top:.35rem">${t('invoices.editOtpHint')}</p>
+    </div>
+  </td>`;
+  tr.after(editRow);
+  editRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function requestInvoiceEditOtp() {
+  const d = await api('/admin/api/auth/users/sensitive-otp', { method: 'POST', body: '{}' });
+  flash(d.mode === 'totp' ? t('users.otpTotpHint') : t('users.otpEmailSent', { email: d.emailMasked || '' }));
+}
+
+async function saveInvoiceEdit(id) {
+  let otp = document.getElementById('editInvOtp')?.value?.trim() || '';
+  if (!otp) otp = prompt(t('users.otpPrompt')) || '';
+  otp = String(otp).trim();
+  if (!otp) {
+    flash(t('users.otpRequired'));
+    return;
+  }
+  const lang = document.getElementById('invPdfLang')?.value || 'en';
+  try {
+    await api(`/admin/api/invoices/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        otp,
+        ticket_no: document.getElementById('editTicket')?.value ?? '',
+        buyer_ref: document.getElementById('editBuyerRef')?.value ?? '',
+        asset: document.getElementById('editAsset')?.value ?? '',
+        asset_amount: document.getElementById('editAssetAmount')?.value ?? '',
+        memo: document.getElementById('editMemo')?.value ?? '',
+        product_snapshot: {
+          code: document.getElementById('editProdCode')?.value ?? '',
+          name: document.getElementById('editProdName')?.value ?? '',
+          description: document.getElementById('editProdDesc')?.value ?? '',
+          unit: document.getElementById('editProdUnit')?.value ?? '',
+          remark: document.getElementById('editProdRemark')?.value ?? '',
+        },
+      }),
+    });
+    await api(`/admin/api/invoices/${id}/regenerate-pdf?pdfLang=${encodeURIComponent(lang)}`, {
+      method: 'POST',
+      body: JSON.stringify({ pdfLang: lang }),
+    });
+    flash(t('invoices.saveEditOk'));
+    invoices();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('api.error.') || msg.startsWith('invoices.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+function onInvoiceQFieldChange() {
+  const field = document.getElementById('invQField');
+  const input = document.getElementById('invQ');
+  invoiceQField = field?.value || '';
+  if (input) {
+    input.disabled = !invoiceQField;
+    if (!invoiceQField) {
+      input.value = '';
+      invoiceQ = '';
+    } else {
+      input.focus();
+    }
+  }
+}
+
+function applyInvoiceSearch() {
+  invoiceSiteFilter = document.getElementById('invSite')?.value || '';
+  invoiceKindFilter = document.getElementById('invKind')?.value || 'all';
+  invoiceQField = document.getElementById('invQField')?.value || '';
+  invoiceQ = invoiceQField ? (document.getElementById('invQ')?.value || '').trim() : '';
+  invoiceFrom = document.getElementById('invFrom')?.value || '';
+  invoiceTo = document.getElementById('invTo')?.value || '';
+  invoicePdfLang = document.getElementById('invPdfLang')?.value || 'en';
+  invoices();
+}
+
+function siteNoticeLabel(s) {
+  const slot = String(s.pdf_notice_slot || (s.pdf_notice_enabled ? 'a' : 'off')).toLowerCase();
+  if (slot === 'a') return s.pdf_notice_a_name || t('sites.noticeActiveA');
+  if (slot === 'b') return s.pdf_notice_b_name || t('sites.noticeActiveB');
+  if (slot === 'c') return s.pdf_notice_c_name || t('sites.noticeActiveC');
+  return t('sites.noticeOff');
+}
+
+function siteRemarksLabel(s) {
+  return s.pdf_remarks_enabled === false ? t('sites.remarksOff') : t('sites.remarksOn');
 }
 
 async function sites() {
   const data = await api('/admin/api/sites');
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('sites.title')}</div><div class="pg-card-body">
+    <p class="pg-card-hint">${t('sites.sealsPageHint')}</p>
+    <input type="hidden" id="siteEditId" value=""/>
     <div class="pg-row">
       <div><label class="pg-label">${t('sites.code')}</label><input class="pg-input" id="siteCode"/></div>
       <div><label class="pg-label">${t('sites.name')}</label><input class="pg-input" id="siteName"/></div>
       <div><label class="pg-label">${t('sites.notes')}</label><input class="pg-input" id="siteNotes"/></div>
+      <div><label class="pg-label">${t('sites.active')}</label>
+        <select class="pg-select" id="siteActive"><option value="true">${t('sites.activeYes')}</option><option value="false">${t('sites.activeNo')}</option></select>
+      </div>
     </div>
-    <button class="pg-btn pg-btn-primary" onclick="createSite()">${t('sites.add')}</button>
-    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('sites.code')}</th><th>${t('sites.name')}</th><th>${t('sites.active')}</th><th>${t('sites.keys')}</th></tr></thead>
-    <tbody>${data.items.map(s=>`<tr><td class="mono">${s.code}</td><td>${s.name}</td><td>${s.active}</td>
-      <td><button class="pg-btn" style="margin:0" onclick="issueKey('${s.id}','${s.code}')">${t('sites.issueKey')}</button>
-      <button class="pg-btn" style="margin:0" onclick="listKeys('${s.id}')">${t('sites.listKeys')}</button></td></tr>`).join('')}</tbody></table>
-    <div id="keysBox"></div></div></div>`;
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem">
+      <button class="pg-btn pg-btn-primary" id="siteSaveBtn" type="button" onclick="saveSite()">${t('sites.add')}</button>
+      <button class="pg-btn hidden" id="siteCancelBtn" type="button" onclick="cancelSiteEdit()">${t('sites.cancelEdit')}</button>
+    </div>
+    <table class="pg-table sites-table" style="margin-top:1rem"><thead><tr>
+      <th>${t('sites.code')}</th>
+      <th>${t('sites.name')}</th>
+      <th>${t('sites.active')}</th>
+      <th>${t('sites.colRemarks')}</th>
+      <th>${t('sites.colNotice')}</th>
+      <th>${t('sites.keys')}</th>
+      <th>${t('sites.sealOfficial')}</th>
+      <th>${t('sites.sealStamp')}</th>
+      <th>${t('sites.sealSignature')}</th>
+      <th>${t('sites.seals')}</th>
+      <th>${t('sites.actions')}</th>
+    </tr></thead>
+    <tbody>${data.items.map(s=>`<tr>
+      <td class="mono">${escHtml(s.code)}</td>
+      <td>${escHtml(s.name)}</td>
+      <td>${s.active ? t('sites.activeYes') : t('sites.activeNo')}</td>
+      <td>${escHtml(siteRemarksLabel(s))}</td>
+      <td>${escHtml(siteNoticeLabel(s))}</td>
+      <td class="sites-keys-cell">
+        <button class="pg-btn" style="margin:0" onclick="issueKey('${s.id}','${escHtml(s.code)}')">${t('sites.issueKey')}</button>
+        <button class="pg-btn" style="margin:0" onclick="listKeys('${s.id}')">${t('sites.listKeys')}</button>
+      </td>
+      <td class="seal-status">${s.seal_official_path ? t('sites.assetOn') : t('sites.assetOff')}</td>
+      <td class="seal-status">${s.seal_stamp_path ? t('sites.assetOn') : t('sites.assetOff')}</td>
+      <td class="seal-status">${s.seal_signature_path ? t('sites.assetOn') : t('sites.assetOff')}</td>
+      <td><button class="pg-btn pg-btn-primary" style="margin:0" onclick="openSiteSeals('${s.id}')">${t('sites.configureSeals')}</button></td>
+      <td style="white-space:nowrap">
+        <button class="pg-btn" style="margin:0" onclick="editSite('${s.id}')">${t('sites.edit')}</button>
+        <button class="pg-btn pg-btn-danger" style="margin:0" onclick="deleteSite('${s.id}','${escHtml(s.code)}')">${t('sites.delete')}</button>
+      </td>
+    </tr>`).join('')}</tbody></table>
+    <div id="keysBox"></div>
+    <div id="sealsBox" class="site-seals-box"></div>
+  </div></div>`;
 }
 
-async function parties() {
-  const data = await api('/admin/api/parties');
-  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('parties.title')}</div><div class="pg-card-body">
-    <div class="pg-row">
-      <div><label class="pg-label">${t('parties.code')}</label><input class="pg-input" id="pCode"/></div>
-      <div><label class="pg-label">${t('parties.kind')}</label><select class="pg-select" id="pKind"><option>seller</option><option>buyer</option><option>both</option></select></div>
-      <div><label class="pg-label">${t('parties.legalName')}</label><input class="pg-input" id="pLegal"/></div>
-      <div><label class="pg-label">${t('parties.country')}</label><input class="pg-input" id="pCountry"/></div>
-    </div>
-    <button class="pg-btn pg-btn-primary" onclick="createParty()">${t('parties.add')}</button>
-    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('parties.code')}</th><th>${t('parties.kind')}</th><th>${t('parties.legalName')}</th><th>${t('parties.country')}</th></tr></thead>
-    <tbody>${data.items.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.kind}</td><td>${p.legal_name}</td><td>${p.country||''}</td></tr>`).join('')}</tbody></table></div></div>`;
+function sealPreview(siteId, kind, hasFile) {
+  if (!hasFile) return `<div class="seal-preview empty" data-seal-kind="${kind}">${t('sites.noAsset')}</div>`;
+  return `<div class="seal-preview" data-seal-kind="${kind}"><img src="/admin/api/sites/${siteId}/seals/${kind}?t=${Date.now()}" alt="${kind}" data-seal-src="1"/></div>`;
 }
+
+function updateSealComposePreview(siteId) {
+  const stage = document.getElementById('sealComposeStage');
+  if (!stage) return;
+  const mode = document.querySelector('input[name="sealDisplayMode"]:checked')?.value || 'official_stamp';
+  const sampleName =
+    (document.getElementById('signatoryName')?.value || '').trim() ||
+    (document.getElementById('siteSignatoryName')?.value || '').trim() ||
+    'BYOUNGSUN YI';
+  const has = (kind) => !!document.querySelector(`.seal-preview[data-seal-kind="${kind}"] img`);
+  const img = (kind, cls) => {
+    const el = document.querySelector(`.seal-preview[data-seal-kind="${kind}"] img`);
+    if (!el) return '';
+    return `<img class="${cls}" src="${el.getAttribute('src')}" alt="${kind}"/>`;
+  };
+  let html = '';
+  if (mode === 'official_stamp') {
+    html = `<div class="seal-compose-stack mode-official-stamp">
+      <div class="sc-name-line"><span class="sc-name-label">Name</span> <span class="sc-name-value">${escHtml(sampleName)}</span></div>
+      ${has('official') ? img('official', 'sc-official') : '<div class="sc-ph sc-official"></div>'}
+      ${has('stamp') ? img('stamp', 'sc-stamp') : '<div class="sc-ph sc-stamp"></div>'}
+    </div>`;
+  } else if (mode === 'official') {
+    html = `<div class="seal-compose-stack mode-official">
+      <div class="sc-name-line"><span class="sc-name-label">Name</span> <span class="sc-name-value">${escHtml(sampleName)}</span></div>
+      ${has('official') ? img('official', 'sc-official') : '<div class="sc-ph sc-official"></div>'}
+    </div>`;
+  } else if (mode === 'signature_stamp') {
+    html = `<div class="seal-compose-stack mode-signature-stamp">
+      <div class="sc-name-line"><span class="sc-name-label">Name</span> <span class="sc-name-value">${escHtml(sampleName)}</span></div>
+      ${has('signature') ? img('signature', 'sc-signature') : '<div class="sc-ph sc-signature"></div>'}
+      ${has('stamp') ? img('stamp', 'sc-stamp') : '<div class="sc-ph sc-stamp"></div>'}
+    </div>`;
+  } else if (mode === 'signature') {
+    html = `<div class="seal-compose-stack mode-signature">
+      <div class="sc-name-line"><span class="sc-name-label">Name</span> <span class="sc-name-value">${escHtml(sampleName)}</span></div>
+      ${has('signature') ? img('signature', 'sc-signature') : '<div class="sc-ph sc-signature"></div>'}
+    </div>`;
+  } else {
+    html = `<div class="seal-compose-stack mode-stamp">
+      <div class="sc-name-line"><span class="sc-name-label">Name</span> <span class="sc-name-value">${escHtml(sampleName)}</span></div>
+      ${has('stamp') ? img('stamp', 'sc-stamp-only') : '<div class="sc-ph sc-stamp-only"></div>'}
+    </div>`;
+  }
+  const modeLabel = ({
+    official_stamp: t('sites.modeOfficialStamp'),
+    official: t('sites.modeOfficial'),
+    signature_stamp: t('sites.modeSignatureStamp'),
+    signature: t('sites.modeSignature'),
+    stamp: t('sites.modeStamp'),
+  })[mode] || mode;
+  stage.innerHTML = `${html}<div class="seal-compose-caption">${escHtml(modeLabel)}</div>`;
+}
+
+function syncNoticeSlotUi() {
+  const slot = document.getElementById('pdfNoticeSlot')?.value || 'off';
+  document.querySelectorAll('.notice-slot-fields').forEach((el) => {
+    el.classList.toggle('hidden', el.getAttribute('data-slot') !== slot || slot === 'off');
+  });
+  const remarksOn = document.getElementById('pdfRemarksEnabled')?.value !== 'false';
+  document.getElementById('remarksFieldsBox')?.classList.toggle('hidden', !remarksOn);
+  const lineSlot = document.getElementById('pdfLineSlot')?.value || 'off';
+  document.querySelectorAll('.line-slot-fields').forEach((el) => {
+    el.classList.toggle('hidden', el.getAttribute('data-slot') !== lineSlot || lineSlot === 'off');
+  });
+}
+
+async function openSiteSeals(siteId) {
+  const data = await api('/admin/api/sites');
+  const s = (data.items || []).find((x) => x.id === siteId);
+  if (!s) return;
+  const box = document.getElementById('sealsBox');
+  if (!box) return;
+  const modeFromFlags = (o, st, g) => {
+    if (o && st && !g) return 'official_stamp';
+    if (o && !st && !g) return 'official';
+    if (!o && st && g) return 'signature_stamp';
+    if (!o && !st && g) return 'signature';
+    if (!o && st && !g) return 'stamp';
+    if (o && st && g) return 'official_stamp';
+    if (o) return 'official';
+    if (g && st) return 'signature_stamp';
+    if (g) return 'signature';
+    if (st) return 'stamp';
+    return 'official_stamp';
+  };
+  const curMode = modeFromFlags(
+    s.seal_use_official !== false,
+    s.seal_use_stamp !== false,
+    s.seal_use_signature !== false,
+  );
+  let noticeSlot = String(s.pdf_notice_slot || '').toLowerCase();
+  if (!['off', 'a', 'b', 'c'].includes(noticeSlot)) {
+    noticeSlot = s.pdf_notice_enabled ? 'a' : 'off';
+  }
+  const nameA = s.pdf_notice_a_name || t('sites.noticeActiveA');
+  const nameB = s.pdf_notice_b_name || t('sites.noticeActiveB');
+  const nameC = s.pdf_notice_c_name || t('sites.noticeActiveC');
+  let lineSlot = String(s.pdf_line_slot || 'off').toLowerCase();
+  if (!['off', 'a', 'b', 'c'].includes(lineSlot)) lineSlot = 'off';
+  const lineNameA = s.pdf_line_a_name || t('sites.lineActiveA');
+  const lineNameB = s.pdf_line_b_name || t('sites.lineActiveB');
+  const lineNameC = s.pdf_line_c_name || t('sites.lineActiveC');
+  const asset = (kind, labelKey, pathKey) => `
+    <div class="seal-card">
+      <div class="seal-card-head">
+        <strong>${t(labelKey)}</strong>
+      </div>
+      ${sealPreview(siteId, kind, !!s[pathKey])}
+      <div class="seal-actions">
+        <label class="pg-btn" style="margin:0;cursor:pointer">
+          ${t('sites.upload')}
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden
+            onchange="uploadSiteSeal('${siteId}','${kind}',this)"/>
+        </label>
+        ${s[pathKey] ? `<button class="pg-btn pg-btn-danger" type="button" style="margin:0" onclick="removeSiteSeal('${siteId}','${kind}')">${t('sites.removeAsset')}</button>` : ''}
+      </div>
+    </div>`;
+  const modeRadio = (value, labelKey) => `
+    <label class="seal-mode-option">
+      <input type="radio" name="sealDisplayMode" value="${value}" ${curMode === value ? 'checked' : ''}
+        onchange="updateSealComposePreview('${siteId}')"/>
+      <span>${t(labelKey)}</span>
+    </label>`;
+  const noticeFields = (key, text, bankName, address, bankCode, branchCode, accountType, accountNumber, accountHolder) => `
+    <div class="notice-slot-fields ${noticeSlot === key ? '' : 'hidden'}" data-slot="${key}">
+      <div><label class="pg-label">${t('sites.pdfNoticeText')}</label>
+        <textarea class="pg-input" id="pdfNotice_${key}_text" rows="2">${escHtml(text || '')}</textarea></div>
+      <div class="pg-row" style="margin-top:.5rem">
+        <div><label class="pg-label">${t('sites.pdfNoticeBankName')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_bankName" value="${escHtml(bankName || '')}"/></div>
+        <div><label class="pg-label">${t('sites.pdfNoticeAddress')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_address" value="${escHtml(address || '')}"/></div>
+      </div>
+      <div class="pg-row" style="margin-top:.5rem">
+        <div><label class="pg-label">${t('sites.pdfNoticeBankCode')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_bankCode" value="${escHtml(bankCode || '')}"/></div>
+        <div><label class="pg-label">${t('sites.pdfNoticeBranchCode')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_branchCode" value="${escHtml(branchCode || '')}"/></div>
+      </div>
+      <div class="pg-row" style="margin-top:.5rem">
+        <div><label class="pg-label">${t('sites.pdfNoticeAccountType')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_accountType" value="${escHtml(accountType || '')}"/></div>
+        <div><label class="pg-label">${t('sites.pdfNoticeAccountNumber')}</label>
+          <input class="pg-input" id="pdfNotice_${key}_accountNumber" value="${escHtml(accountNumber || '')}"/></div>
+      </div>
+      <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfNoticeAccountHolder')}</label>
+        <input class="pg-input" id="pdfNotice_${key}_accountHolder" value="${escHtml(accountHolder || '')}"/></div>
+    </div>`;
+  const noticePackArgs = (key) => {
+    const legacyNum = s[`pdf_notice_${key}_account_number`] || s[`pdf_notice_${key}_ac_no`] || (key === 'a' ? s.pdf_notice_ac_no : '');
+    const legacyHolder = s[`pdf_notice_${key}_account_holder`] || s[`pdf_notice_${key}_ac_name`] || (key === 'a' ? s.pdf_notice_ac_name : '');
+    const legacyAddr = s[`pdf_notice_${key}_address`] || s[`pdf_notice_${key}_bank_add`] || (key === 'a' ? s.pdf_notice_bank_add : '');
+    return [
+      key,
+      s[`pdf_notice_${key}_text`] || (key === 'a' ? s.pdf_notice_text : '') || '',
+      s[`pdf_notice_${key}_bank_name`] || '',
+      legacyAddr || '',
+      s[`pdf_notice_${key}_bank_code`] || '',
+      s[`pdf_notice_${key}_branch_code`] || '',
+      s[`pdf_notice_${key}_account_type`] || '',
+      legacyNum || '',
+      legacyHolder || '',
+    ];
+  };
+  const lineFields = (key, item, description, unitLabel, hideUnitPrice) => `
+    <div class="line-slot-fields notice-slot-fields ${lineSlot === key ? '' : 'hidden'}" data-slot="${key}">
+      <div class="pg-row" style="margin-top:.5rem">
+        <div><label class="pg-label">${t('sites.pdfLineItem')}</label>
+          <input class="pg-input" id="pdfLine_${key}_item" value="${escHtml(item || '')}"/></div>
+        <div><label class="pg-label">${t('sites.pdfLineUnitLabel')}</label>
+          <input class="pg-input" id="pdfLine_${key}_unitLabel" value="${escHtml(unitLabel ?? '')}"
+            placeholder="${escHtml(t('sites.pdfLineUnitLabelPh'))}"/></div>
+      </div>
+      <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfLineDescription')}</label>
+        <textarea class="pg-input" id="pdfLine_${key}_description" rows="2">${escHtml(description || '')}</textarea></div>
+      <label class="seal-check" style="margin-top:.55rem">
+        <input type="checkbox" id="pdfLine_${key}_hideUnitPrice" ${hideUnitPrice ? 'checked' : ''}/>
+        <span>${t('sites.pdfLineHideUnitPrice')}</span>
+      </label>
+      <p class="pg-card-hint" style="margin-top:.25rem">${t('sites.pdfLineHideUnitPriceHint')}</p>
+    </div>`;
+  const linePackArgs = (key) => [
+    key,
+    s[`pdf_line_${key}_item`] || '',
+    s[`pdf_line_${key}_description`] || '',
+    s[`pdf_line_${key}_unit_label`] ?? '',
+    s[`pdf_line_${key}_hide_unit_price`] === true,
+  ];
+  box.innerHTML = `
+    <div class="site-seals-panel">
+      <h3>${t('sites.seals')} · <span class="mono">${escHtml(s.code)}</span> · ${escHtml(s.name||'')}</h3>
+      <p class="pg-card-hint">${t('sites.sealsHint')}</p>
+      <div class="seal-mode-box">
+        <div class="pg-label">${t('sites.sealDisplayMode')}</div>
+        <div class="seal-mode-list">
+          ${modeRadio('official_stamp', 'sites.modeOfficialStamp')}
+          ${modeRadio('official', 'sites.modeOfficial')}
+          ${modeRadio('signature_stamp', 'sites.modeSignatureStamp')}
+          ${modeRadio('signature', 'sites.modeSignature')}
+          ${modeRadio('stamp', 'sites.modeStamp')}
+        </div>
+      </div>
+      <div class="seal-compose-grid">
+        <div class="seal-card seal-compose-card">
+          <div class="seal-card-head"><strong>${t('sites.sealPreview')}</strong></div>
+          <div class="seal-compose-stage" id="sealComposeStage"></div>
+        </div>
+        ${asset('official', 'sites.sealOfficial', 'seal_official_path')}
+        ${asset('stamp', 'sites.sealStamp', 'seal_stamp_path')}
+        ${asset('signature', 'sites.sealSignature', 'seal_signature_path')}
+      </div>
+      <div class="pg-row" style="margin-top:1rem">
+        <div><label class="pg-label">${t('sites.signatoryName')}</label>
+          <input class="pg-input" id="signatoryName" value="${escHtml(s.signatory_name || '')}"
+            oninput="updateSealComposePreview('${siteId}')"/></div>
+        <div><label class="pg-label">${t('sites.signatoryTitle')}</label>
+          <input class="pg-input" id="signatoryTitle" value="${escHtml(s.signatory_title || 'CEO')}"/></div>
+      </div>
+      <p class="pg-card-hint" style="margin:.35rem 0 0">${t('sites.signatoryFallbackHint')}</p>
+
+      <div class="site-pdf-defaults" style="margin-top:1.25rem">
+        <h4 style="margin:0 0 .5rem;font-size:14px">${t('sites.pdfDefaults')}</h4>
+        <p class="pg-card-hint">${t('sites.pdfDefaultsHint')}</p>
+
+        <div class="pg-label" style="margin-top:.75rem">${t('sites.pdfExposure')}</div>
+        <div class="pg-row">
+          <div><label class="pg-label">${t('sites.pdfRemarksSlot')}</label>
+            <select class="pg-select" id="pdfRemarksEnabled" onchange="syncNoticeSlotUi()">
+              <option value="true" ${s.pdf_remarks_enabled !== false ? 'selected' : ''}>${t('sites.remarksOn')}</option>
+              <option value="false" ${s.pdf_remarks_enabled === false ? 'selected' : ''}>${t('sites.remarksOff')}</option>
+            </select>
+          </div>
+          <div><label class="pg-label">${t('sites.pdfNoticeSlot')}</label>
+            <select class="pg-select" id="pdfNoticeSlot" onchange="syncNoticeSlotUi()">
+              <option value="off" ${noticeSlot === 'off' ? 'selected' : ''}>${t('sites.noticeOff')}</option>
+              <option value="a" ${noticeSlot === 'a' ? 'selected' : ''}>${escHtml(nameA)}</option>
+              <option value="b" ${noticeSlot === 'b' ? 'selected' : ''}>${escHtml(nameB)}</option>
+              <option value="c" ${noticeSlot === 'c' ? 'selected' : ''}>${escHtml(nameC)}</option>
+            </select>
+          </div>
+          <div><label class="pg-label">${t('sites.pdfLineSlot')}</label>
+            <select class="pg-select" id="pdfLineSlot" onchange="syncNoticeSlotUi()">
+              <option value="off" ${lineSlot === 'off' ? 'selected' : ''}>${t('sites.lineOff')}</option>
+              <option value="a" ${lineSlot === 'a' ? 'selected' : ''}>${escHtml(lineNameA)}</option>
+              <option value="b" ${lineSlot === 'b' ? 'selected' : ''}>${escHtml(lineNameB)}</option>
+              <option value="c" ${lineSlot === 'c' ? 'selected' : ''}>${escHtml(lineNameC)}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="pg-label" style="margin-top:1rem">${t('sites.pdfPayment')}</div>
+        <div class="pg-row">
+          <div><label class="pg-label">${t('sites.pdfPaymentDateOffset')}</label>
+            <input class="pg-input" type="number" min="0" max="365" id="pdfPaymentDateOffset"
+              value="${Number(s.pdf_payment_date_offset ?? 3)}"/></div>
+        </div>
+        <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfPaymentTerms')}</label>
+          <textarea class="pg-input" id="pdfPaymentTerms" rows="2">${escHtml(s.pdf_payment_terms || t('pdf.paymentTermsBody'))}</textarea></div>
+        <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfPaymentDue')}</label>
+          <input class="pg-input" id="pdfPaymentDue" value="${escHtml(s.pdf_payment_due || t('pdf.paymentDue'))}"/></div>
+
+        <div id="remarksFieldsBox" class="${s.pdf_remarks_enabled === false ? 'hidden' : ''}">
+          <div class="pg-label" style="margin-top:1rem">${t('sites.pdfRemarks')}</div>
+          <div><label class="pg-label">${t('sites.pdfRemarksNotice')}</label>
+            <textarea class="pg-input" id="pdfRemarksNotice" rows="2">${escHtml(s.pdf_remarks_notice || '')}</textarea></div>
+          <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.pdfRemarksBankHint')}</p>
+        </div>
+
+        <div class="pg-label" style="margin-top:1rem">${t('sites.pdfNotice')}</div>
+        <p class="pg-card-hint">${t('sites.pdfNoticeHint')}</p>
+        <div class="pg-row" id="noticeSlotNames" style="margin-top:.35rem">
+          <div><label class="pg-label">${t('sites.noticeNameA')}</label>
+            <input class="pg-input" id="pdfNotice_a_name" value="${escHtml(nameA)}" oninput="refreshNoticeSlotOptions()"/></div>
+          <div><label class="pg-label">${t('sites.noticeNameB')}</label>
+            <input class="pg-input" id="pdfNotice_b_name" value="${escHtml(nameB)}" oninput="refreshNoticeSlotOptions()"/></div>
+          <div><label class="pg-label">${t('sites.noticeNameC')}</label>
+            <input class="pg-input" id="pdfNotice_c_name" value="${escHtml(nameC)}" oninput="refreshNoticeSlotOptions()"/></div>
+        </div>
+        ${noticeFields(...noticePackArgs('a'))}
+        ${noticeFields(...noticePackArgs('b'))}
+        ${noticeFields(...noticePackArgs('c'))}
+
+        <div class="pg-label" style="margin-top:1rem">${t('sites.pdfLine')}</div>
+        <p class="pg-card-hint">${t('sites.pdfLineHint')}</p>
+        <div class="pg-row" id="lineSlotNames" style="margin-top:.35rem">
+          <div><label class="pg-label">${t('sites.lineNameA')}</label>
+            <input class="pg-input" id="pdfLine_a_name" value="${escHtml(lineNameA)}" oninput="refreshLineSlotOptions()"/></div>
+          <div><label class="pg-label">${t('sites.lineNameB')}</label>
+            <input class="pg-input" id="pdfLine_b_name" value="${escHtml(lineNameB)}" oninput="refreshLineSlotOptions()"/></div>
+          <div><label class="pg-label">${t('sites.lineNameC')}</label>
+            <input class="pg-input" id="pdfLine_c_name" value="${escHtml(lineNameC)}" oninput="refreshLineSlotOptions()"/></div>
+        </div>
+        ${lineFields(...linePackArgs('a'))}
+        ${lineFields(...linePackArgs('b'))}
+        ${lineFields(...linePackArgs('c'))}
+      </div>
+
+      <button class="pg-btn pg-btn-primary" type="button" style="margin-top:1rem" onclick="saveSiteSealSettings('${siteId}')">${t('sites.saveSeal')}</button>
+    </div>`;
+  updateSealComposePreview(siteId);
+  syncNoticeSlotUi();
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function refreshNoticeSlotOptions() {
+  const sel = document.getElementById('pdfNoticeSlot');
+  if (!sel) return;
+  const a = document.getElementById('pdfNotice_a_name')?.value || t('sites.noticeActiveA');
+  const b = document.getElementById('pdfNotice_b_name')?.value || t('sites.noticeActiveB');
+  const c = document.getElementById('pdfNotice_c_name')?.value || t('sites.noticeActiveC');
+  const cur = sel.value;
+  sel.innerHTML = `
+    <option value="off">${t('sites.noticeOff')}</option>
+    <option value="a">${escHtml(a)}</option>
+    <option value="b">${escHtml(b)}</option>
+    <option value="c">${escHtml(c)}</option>`;
+  sel.value = cur;
+}
+
+function refreshLineSlotOptions() {
+  const sel = document.getElementById('pdfLineSlot');
+  if (!sel) return;
+  const a = document.getElementById('pdfLine_a_name')?.value || t('sites.lineActiveA');
+  const b = document.getElementById('pdfLine_b_name')?.value || t('sites.lineActiveB');
+  const c = document.getElementById('pdfLine_c_name')?.value || t('sites.lineActiveC');
+  const cur = sel.value;
+  sel.innerHTML = `
+    <option value="off">${t('sites.lineOff')}</option>
+    <option value="a">${escHtml(a)}</option>
+    <option value="b">${escHtml(b)}</option>
+    <option value="c">${escHtml(c)}</option>`;
+  sel.value = cur;
+}
+
+async function uploadSiteSeal(siteId, kind, input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`/admin/api/sites/${siteId}/seals/${kind}`, {
+    method: 'POST',
+    body: fd,
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    flash(err.error || 'Upload failed');
+    return;
+  }
+  flash(t('sites.sealSaved'));
+  sites().then(() => openSiteSeals(siteId));
+}
+
+async function removeSiteSeal(siteId, kind) {
+  if (!confirm(t('sites.removeAsset') + '?')) return;
+  await api(`/admin/api/sites/${siteId}/seals/${kind}`, { method: 'DELETE', body: '{}' });
+  sites().then(() => openSiteSeals(siteId));
+}
+
+async function saveSiteSealSettings(siteId) {
+  const mode = document.querySelector('input[name="sealDisplayMode"]:checked')?.value || 'official_stamp';
+  const flags = {
+    official_stamp: { seal_use_official: true, seal_use_stamp: true, seal_use_signature: false },
+    official: { seal_use_official: true, seal_use_stamp: false, seal_use_signature: false },
+    signature_stamp: { seal_use_official: false, seal_use_stamp: true, seal_use_signature: true },
+    signature: { seal_use_official: false, seal_use_stamp: false, seal_use_signature: true },
+    stamp: { seal_use_official: false, seal_use_stamp: true, seal_use_signature: false },
+  }[mode] || { seal_use_official: true, seal_use_stamp: true, seal_use_signature: false };
+  const slot = document.getElementById('pdfNoticeSlot')?.value || 'off';
+  const lineSlot = document.getElementById('pdfLineSlot')?.value || 'off';
+  const pack = (key) => ({
+    [`pdf_notice_${key}_name`]: document.getElementById(`pdfNotice_${key}_name`)?.value || '',
+    [`pdf_notice_${key}_text`]: document.getElementById(`pdfNotice_${key}_text`)?.value || '',
+    [`pdf_notice_${key}_bank_name`]: document.getElementById(`pdfNotice_${key}_bankName`)?.value || '',
+    [`pdf_notice_${key}_address`]: document.getElementById(`pdfNotice_${key}_address`)?.value || '',
+    [`pdf_notice_${key}_bank_code`]: document.getElementById(`pdfNotice_${key}_bankCode`)?.value || '',
+    [`pdf_notice_${key}_branch_code`]: document.getElementById(`pdfNotice_${key}_branchCode`)?.value || '',
+    [`pdf_notice_${key}_account_type`]: document.getElementById(`pdfNotice_${key}_accountType`)?.value || '',
+    [`pdf_notice_${key}_account_number`]: document.getElementById(`pdfNotice_${key}_accountNumber`)?.value || '',
+    [`pdf_notice_${key}_account_holder`]: document.getElementById(`pdfNotice_${key}_accountHolder`)?.value || '',
+  });
+  const packLine = (key) => ({
+    [`pdf_line_${key}_name`]: document.getElementById(`pdfLine_${key}_name`)?.value || '',
+    [`pdf_line_${key}_item`]: document.getElementById(`pdfLine_${key}_item`)?.value || '',
+    [`pdf_line_${key}_description`]: document.getElementById(`pdfLine_${key}_description`)?.value || '',
+    [`pdf_line_${key}_unit_label`]: document.getElementById(`pdfLine_${key}_unitLabel`)?.value ?? '',
+    [`pdf_line_${key}_hide_unit_price`]: !!document.getElementById(`pdfLine_${key}_hideUnitPrice`)?.checked,
+  });
+  await api(`/admin/api/sites/${siteId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      signatory_name: document.getElementById('signatoryName')?.value || '',
+      signatory_title: document.getElementById('signatoryTitle')?.value || 'CEO',
+      ...flags,
+      pdf_payment_date_offset: Number(document.getElementById('pdfPaymentDateOffset')?.value ?? 3),
+      pdf_payment_terms: document.getElementById('pdfPaymentTerms')?.value || '',
+      pdf_payment_due: document.getElementById('pdfPaymentDue')?.value || '',
+      pdf_remarks_notice: document.getElementById('pdfRemarksNotice')?.value || '',
+      pdf_remarks_enabled: document.getElementById('pdfRemarksEnabled')?.value !== 'false',
+      pdf_notice_slot: slot,
+      ...pack('a'),
+      ...pack('b'),
+      ...pack('c'),
+      pdf_line_slot: lineSlot,
+      ...packLine('a'),
+      ...packLine('b'),
+      ...packLine('c'),
+    }),
+  });
+  flash(t('sites.sealSaved'));
+  sites().then(() => openSiteSeals(siteId));
+}
+
+let partyTab = 'buyer';
+let editingPartyId = null;
+/** When set, form is in copy mode (create new with prefilled fields; code must be new). */
+let copyingPartyId = null;
+let partiesCache = [];
+
+async function parties() {
+  const [pdata, sdata] = await Promise.all([
+    api('/admin/api/parties'),
+    api('/admin/api/sites'),
+  ]);
+  const sites = sdata.items || [];
+  const all = pdata.items || [];
+  partiesCache = all;
+  const siteOpts = sites.map((s) => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.code)})</option>`).join('');
+  const isBuyer = (p) => p.kind === 'buyer' || p.kind === 'both';
+  const isSeller = (p) => p.kind === 'seller' || p.kind === 'both';
+  const list = partyTab === 'buyer' ? all.filter(isBuyer) : all.filter(isSeller);
+  const tab = (id, label) =>
+    `<button type="button" class="inv-tab ${partyTab===id?'on':''}" onclick="setPartyTab('${id}')">${label}</button>`;
+  const formPrefix = partyTab === 'buyer' ? 'pb' : 'ps';
+  const formKind = partyTab;
+  const codePh = partyTab === 'buyer' ? 'OTL-JP' : 'OTL-KR';
+  const countryPh = partyTab === 'buyer' ? 'JP' : 'KR';
+  const editing = editingPartyId ? all.find((p) => p.id === editingPartyId) : null;
+  const copying = copyingPartyId ? all.find((p) => p.id === copyingPartyId) : null;
+  const formSource = editing || copying;
+  const formTitle = editing
+    ? t('parties.editTitle')
+    : copying
+      ? t('parties.copyTitle')
+      : partyTab === 'buyer'
+        ? t('parties.addBuyer')
+        : t('parties.addSeller');
+  const saveLabel = editing
+    ? t('parties.saveEdit')
+    : copying
+      ? t('parties.saveCopy')
+      : partyTab === 'buyer'
+        ? t('parties.addBuyer')
+        : t('parties.addSeller');
+  const codeLocked = !!editing;
+  const showCancel = !!(editing || copying);
+  const bankRow =
+    partyTab === 'seller'
+      ? `<div style="margin-top:.75rem">
+          <label class="pg-label">${t('parties.bankInfo')}</label>
+          <p class="pg-card-hint" style="margin:.25rem 0 .5rem">${t('parties.bankInfoHint')}</p>
+          <div class="pg-row">
+            <div><label class="pg-label">${t('parties.bank.accountNo')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_accountNo" placeholder="${escHtml(t('parties.bank.accountNoPh'))}" autocomplete="off"/></div>
+            <div><label class="pg-label">${t('parties.bank.accountName')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_accountName" placeholder="${escHtml(t('parties.bank.accountNamePh'))}" autocomplete="off"/></div>
+            <div><label class="pg-label">${t('parties.bank.bankName')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_bankName" placeholder="${escHtml(t('parties.bank.bankNamePh'))}" autocomplete="off"/></div>
+          </div>
+          <div class="pg-row">
+            <div style="flex:2"><label class="pg-label">${t('parties.bank.bankAddress')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_bankAddress" placeholder="${escHtml(t('parties.bank.bankAddressPh'))}" autocomplete="off"/></div>
+            <div><label class="pg-label">${t('parties.bank.branchName')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_branchName" placeholder="${escHtml(t('parties.bank.branchNamePh'))}" autocomplete="off"/></div>
+          </div>
+          <div class="pg-row">
+            <div><label class="pg-label">${t('parties.bank.swiftCode')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_swiftCode" placeholder="${escHtml(t('parties.bank.swiftCodePh'))}" autocomplete="off"/></div>
+            <div><label class="pg-label">${t('parties.bank.fax')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_fax" placeholder="${escHtml(t('parties.bank.faxPh'))}" autocomplete="off"/></div>
+            <div><label class="pg-label">${t('parties.bank.website')}</label>
+              <input class="pg-input" id="${formPrefix}Bank_website" placeholder="${escHtml(t('parties.bank.websitePh'))}" autocomplete="off"/></div>
+          </div>
+        </div>`
+      : '';
+  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('parties.title')}</div><div class="pg-card-body">
+    <div class="inv-tabs" style="margin-bottom:.75rem">
+      ${tab('buyer', t('parties.tab.buyer'))}
+      ${tab('seller', t('parties.tab.seller'))}
+    </div>
+    <p class="pg-card-hint">${t('parties.hint')}</p>
+    <div class="party-form-card" style="margin-top:.75rem">
+      <h3 id="partyFormTitle">${formTitle}</h3>
+      ${copying ? `<p class="pg-card-hint">${t('parties.copyHint')}</p>` : ''}
+      <input type="hidden" id="partyEditId" value="${editing ? escHtml(editing.id) : ''}"/>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('parties.site')}</label><select class="pg-select" id="${formPrefix}Site">${siteOpts}</select></div>
+        <div><label class="pg-label">${t('parties.code')}</label>
+          <input class="pg-input" id="${formPrefix}Code" placeholder="${codePh}" ${codeLocked ? 'readonly disabled' : ''}/>
+          ${codeLocked ? `<p class="pg-card-hint" style="margin-top:.25rem">${t('parties.codeLocked')}</p>` : ''}
+          ${copying ? `<p class="pg-card-hint" style="margin-top:.25rem">${t('parties.codeNewRequired')}</p>` : ''}
+        </div>
+        <div><label class="pg-label">${t('parties.legalName')}</label><input class="pg-input" id="${formPrefix}Legal"/></div>
+      </div>
+      <div class="pg-row">
+        <div><label class="pg-label">${partyTab === 'buyer' ? t('parties.contactName') : t('parties.signatoryName')}</label>
+          <input class="pg-input" id="${formPrefix}SignName" placeholder="${escHtml(partyTab === 'buyer' ? t('parties.contactNamePh') : t('parties.signatoryNamePh'))}"/></div>
+        <div><label class="pg-label">${partyTab === 'buyer' ? t('parties.contactTitle') : t('parties.signatoryTitle')}</label>
+          <input class="pg-input" id="${formPrefix}SignTitle" placeholder="${escHtml(partyTab === 'buyer' ? t('parties.contactTitlePh') : t('parties.signatoryTitlePh'))}"/></div>
+      </div>
+      <p class="pg-card-hint" style="margin:.25rem 0 .5rem">${partyTab === 'buyer' ? t('parties.contactHint') : t('parties.signatoryHint')}</p>
+      <div class="pg-row">
+        <div style="flex:2"><label class="pg-label">${t('parties.address')}</label><input class="pg-input" id="${formPrefix}Address"/></div>
+        <div><label class="pg-label">${t('parties.phone')}</label><input class="pg-input" id="${formPrefix}Phone"/></div>
+        <div><label class="pg-label">${t('parties.website')}</label><input class="pg-input" id="${formPrefix}Web" placeholder="https://"/></div>
+      </div>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('parties.country')}</label><input class="pg-input" id="${formPrefix}Country" placeholder="${countryPh}"/></div>
+        <div><label class="pg-label">${t('parties.email')}</label><input class="pg-input" id="${formPrefix}Email"/></div>
+        <div><label class="pg-label">${t('parties.taxId')}</label><input class="pg-input" id="${formPrefix}Tax"/></div>
+      </div>
+      ${bankRow}
+      <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="pg-btn pg-btn-primary" type="button" id="partySaveBtn" onclick="savePartyKind('${formKind}')">${saveLabel}</button>
+        <button class="pg-btn ${showCancel ? '' : 'hidden'}" type="button" id="partyCancelBtn" onclick="cancelPartyEdit()">${t('parties.cancelEdit')}</button>
+      </div>
+    </div>
+    <table class="pg-table parties-table" style="margin-top:1.25rem"><thead><tr>
+      <th>${t('parties.site')}</th>
+      <th>${t('parties.code')}</th>
+      <th>${t('parties.legalName')}</th>
+      <th>${t('parties.country')}</th>
+      <th>${t('parties.phone')}</th>
+      <th>${t('parties.website')}</th>
+      <th class="inv-col-manage">${t('col.manage')}</th>
+    </tr></thead>
+    <tbody>${list.map((p) => `<tr>
+      <td class="mono">${escHtml(p.site_code||'—')}</td>
+      <td class="mono">${escHtml(p.code)}</td>
+      <td>${escHtml(p.legal_name)}</td>
+      <td>${escHtml(p.country||'')}</td>
+      <td>${escHtml(p.phone||'')}</td>
+      <td>${escHtml(p.website||'')}</td>
+      <td style="white-space:nowrap">
+        <button class="pg-btn" style="margin:0" type="button" onclick="editParty('${p.id}')">${t('parties.edit')}</button>
+        <button class="pg-btn" style="margin:0" type="button" onclick="copyParty('${p.id}')">${t('parties.copy')}</button>
+        <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteParty('${p.id}','${escHtml(p.code)}')">${t('parties.delete')}</button>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="7">${t('parties.empty')}</td></tr>`}</tbody></table>
+  </div></div>`;
+  if (formSource) {
+    fillPartyForm(formSource);
+    if (copying) {
+      const codeEl = document.getElementById(formPrefix + 'Code');
+      if (codeEl) {
+        codeEl.value = '';
+        codeEl.focus();
+      }
+    }
+  }
+}
+
+function setPartyTab(id) {
+  partyTab = id === 'seller' ? 'seller' : 'buyer';
+  editingPartyId = null;
+  copyingPartyId = null;
+  parties();
+}
+
+function partyFormPrefix(kind) {
+  return kind === 'seller' ? 'ps' : 'pb';
+}
+
+function parsePartyBankInfo(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object' && raw && !Array.isArray(raw)) return raw;
+  try {
+    const j = JSON.parse(String(raw));
+    if (j && typeof j === 'object' && !Array.isArray(j)) return j;
+  } catch { /* plain */ }
+  return {};
+}
+
+function collectPartyBankInfo(prefix) {
+  const keys = ['bankName', 'accountNo', 'accountName', 'bankAddress', 'branchName', 'swiftCode', 'fax', 'website'];
+  const out = {};
+  for (const k of keys) {
+    const el = document.getElementById(prefix + 'Bank_' + k);
+    const v = String(el?.value || '').trim();
+    if (v) out[k] = v;
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : '';
+}
+
+function fillPartyBankInfo(prefix, raw) {
+  const bank = parsePartyBankInfo(raw);
+  const map = {
+    bankName: bank.bankName || bank.bank || '',
+    accountNo: bank.accountNo || bank.acNo || '',
+    accountName: bank.accountName || bank.acName || '',
+    bankAddress: bank.bankAddress || bank.bankAdd || '',
+    branchName: bank.branchName || bank.branch || '',
+    swiftCode: bank.swiftCode || bank.swift || '',
+    fax: bank.fax || '',
+    website: bank.website || '',
+  };
+  Object.entries(map).forEach(([k, v]) => {
+    const el = document.getElementById(prefix + 'Bank_' + k);
+    if (el) el.value = v;
+  });
+}
+
+function partyFormPayload(kind) {
+  const prefix = partyFormPrefix(kind);
+  const payload = {
+    site_id: document.getElementById(prefix + 'Site')?.value,
+    kind,
+    code: document.getElementById(prefix + 'Code')?.value,
+    legal_name: document.getElementById(prefix + 'Legal')?.value,
+    signatory_name: document.getElementById(prefix + 'SignName')?.value,
+    signatory_title: document.getElementById(prefix + 'SignTitle')?.value,
+    address: document.getElementById(prefix + 'Address')?.value,
+    phone: document.getElementById(prefix + 'Phone')?.value,
+    website: document.getElementById(prefix + 'Web')?.value,
+    country: document.getElementById(prefix + 'Country')?.value,
+    email: document.getElementById(prefix + 'Email')?.value,
+    tax_id: document.getElementById(prefix + 'Tax')?.value,
+  };
+  if (kind === 'seller') {
+    payload.bank_info = collectPartyBankInfo(prefix);
+  }
+  return payload;
+}
+
+function fillPartyForm(p) {
+  const kind = p.kind === 'buyer' ? 'buyer' : 'seller';
+  const prefix = partyFormPrefix(kind);
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v ?? '';
+  };
+  set(prefix + 'Site', p.site_id || '');
+  set(prefix + 'Code', p.code || '');
+  set(prefix + 'Legal', p.legal_name || '');
+  set(prefix + 'SignName', p.signatory_name || '');
+  set(prefix + 'SignTitle', p.signatory_title || '');
+  set(prefix + 'Address', p.address || '');
+  set(prefix + 'Phone', p.phone || '');
+  set(prefix + 'Web', p.website || '');
+  set(prefix + 'Country', p.country || '');
+  set(prefix + 'Email', p.email || '');
+  set(prefix + 'Tax', p.tax_id || '');
+  if (kind === 'seller') fillPartyBankInfo(prefix, p.bank_info);
+}
+
+function editParty(id) {
+  const p = partiesCache.find((x) => x.id === id);
+  if (!p) return;
+  editingPartyId = id;
+  copyingPartyId = null;
+  partyTab = p.kind === 'buyer' ? 'buyer' : 'seller';
+  parties();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function copyParty(id) {
+  const p = partiesCache.find((x) => x.id === id);
+  if (!p) return;
+  editingPartyId = null;
+  copyingPartyId = id;
+  partyTab = p.kind === 'buyer' ? 'buyer' : 'seller';
+  parties();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelPartyEdit() {
+  editingPartyId = null;
+  copyingPartyId = null;
+  parties();
+}
+
+async function savePartyKind(kind) {
+  const payload = partyFormPayload(kind);
+  const editId = editingPartyId || document.getElementById('partyEditId')?.value || '';
+  try {
+    if (editId) {
+      // Edit: code is immutable — never send code on PATCH
+      delete payload.code;
+      await api(`/admin/api/parties/${editId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      flash(t('parties.updated'));
+    } else {
+      const code = String(payload.code || '').trim();
+      if (!code) {
+        flash(t('parties.codeRequired'));
+        return;
+      }
+      if (copyingPartyId) {
+        const src = partiesCache.find((x) => x.id === copyingPartyId);
+        if (src && String(src.code).toLowerCase() === code.toLowerCase()) {
+          flash(t('parties.codeMustDiffer'));
+          return;
+        }
+      }
+      await api('/admin/api/parties', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      flash(copyingPartyId ? t('parties.copied') : t('parties.saved'));
+    }
+    editingPartyId = null;
+    copyingPartyId = null;
+    partyTab = kind === 'seller' ? 'seller' : 'buyer';
+    parties();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('parties.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+async function createPartyKind(kind) {
+  return savePartyKind(kind);
+}
+
+async function deleteParty(id, code) {
+  if (!confirm(t('parties.deleteConfirm', { code }))) return;
+  try {
+    await api(`/admin/api/parties/${id}`, { method: 'DELETE', body: '{}' });
+    if (editingPartyId === id) editingPartyId = null;
+    if (copyingPartyId === id) copyingPartyId = null;
+    flash(t('parties.deleted'));
+    parties();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('parties.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+let editingProductId = null;
+let copyingProductId = null;
+let productsCache = [];
+let editingMappingSiteId = null;
+let mappingsCache = [];
 
 async function products() {
   const data = await api('/admin/api/products');
+  productsCache = data.items || [];
+  const editing = editingProductId
+    ? productsCache.find((p) => p.id === editingProductId)
+    : null;
+  const copying = copyingProductId
+    ? productsCache.find((p) => p.id === copyingProductId)
+    : null;
+  const formSource = editing || copying;
+  const formTitle = editing
+    ? t('products.editTitle')
+    : copying
+      ? t('products.copyTitle')
+      : t('products.add');
+  const saveLabel = editing
+    ? t('products.saveEdit')
+    : copying
+      ? t('products.saveCopy')
+      : t('products.add');
+  const codeLocked = !!editing;
+  const showCancel = !!(editing || copying);
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('products.title')}</div><div class="pg-card-body">
-    <div class="pg-row">
-      <div><label class="pg-label">${t('products.code')}</label><input class="pg-input" id="prCode"/></div>
-      <div><label class="pg-label">${t('products.name')}</label><input class="pg-input" id="prName"/></div>
-      <div><label class="pg-label">${t('products.unit')}</label><input class="pg-input" id="prUnit" value="USDT"/></div>
-      <div><label class="pg-label">${t('products.currency')}</label><input class="pg-input" id="prCur" value="USD"/></div>
+    <p class="pg-card-hint">${t('products.hint')}</p>
+    <div class="party-form-card" style="margin-top:.35rem">
+      <h3 id="productFormTitle">${formTitle}</h3>
+      ${copying ? `<p class="pg-card-hint">${t('products.copyHint')}</p>` : ''}
+      <input type="hidden" id="productEditId" value="${editing ? escHtml(editing.id) : ''}"/>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('products.code')}</label>
+          <input class="pg-input" id="prCode" ${codeLocked ? 'readonly disabled' : ''}/>
+          ${codeLocked ? `<p class="pg-card-hint" style="margin-top:.25rem">${t('products.codeLocked')}</p>` : ''}
+          ${copying ? `<p class="pg-card-hint" style="margin-top:.25rem">${t('products.codeNewRequired')}</p>` : ''}
+        </div>
+        <div><label class="pg-label">${t('products.name')}</label><input class="pg-input" id="prName"/></div>
+        <div><label class="pg-label">${t('products.unit')}</label><input class="pg-input" id="prUnit" value="USDT"/></div>
+        <div><label class="pg-label">${t('products.currency')}</label><input class="pg-input" id="prCur" value="USD"/></div>
+      </div>
+      <div class="pg-row" style="margin-top:.5rem">
+        <div style="flex:2"><label class="pg-label">${t('products.description')}</label>
+          <input class="pg-input" id="prDesc" placeholder="${escHtml(t('products.description'))}"/></div>
+        <div style="flex:1"><label class="pg-label">${t('products.remark')}</label>
+          <input class="pg-input" id="prRemark" placeholder="${escHtml(t('products.remarkPh'))}"/></div>
+      </div>
+      <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="pg-btn pg-btn-primary" type="button" onclick="saveProduct()">${saveLabel}</button>
+        <button class="pg-btn ${showCancel ? '' : 'hidden'}" type="button" onclick="cancelProductEdit()">${t('products.cancelEdit')}</button>
+      </div>
     </div>
-    <button class="pg-btn pg-btn-primary" onclick="createProduct()">${t('products.add')}</button>
-    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('products.code')}</th><th>${t('products.name')}</th><th>${t('products.unit')}</th><th>${t('products.currency')}</th></tr></thead>
-    <tbody>${data.items.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.name}</td><td>${p.unit}</td><td>${p.default_currency}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <table class="pg-table products-table" style="margin-top:1rem"><thead><tr>
+      <th>${t('products.code')}</th><th>${t('products.name')}</th><th>${t('products.unit')}</th><th>${t('products.currency')}</th><th>${t('products.remark')}</th><th class="inv-col-manage">${t('col.manage')}</th>
+    </tr></thead>
+    <tbody>${productsCache.map((p) => `<tr>
+      <td class="mono">${escHtml(p.code)}</td>
+      <td>${escHtml(p.name)}</td>
+      <td>${escHtml(p.unit)}</td>
+      <td>${escHtml(p.default_currency)}</td>
+      <td>${escHtml(p.remark || '—')}</td>
+      <td style="white-space:nowrap">
+        <button class="pg-btn" style="margin:0" type="button" onclick="editProduct('${p.id}')">${t('products.edit')}</button>
+        <button class="pg-btn" style="margin:0" type="button" onclick="copyProduct('${p.id}')">${t('products.copy')}</button>
+        <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteProduct('${p.id}','${escHtml(p.code)}')">${t('products.delete')}</button>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="6">${t('products.empty')}</td></tr>`}</tbody></table></div></div>`;
+  if (formSource) {
+    document.getElementById('prCode').value = formSource.code || '';
+    document.getElementById('prName').value = formSource.name || '';
+    document.getElementById('prUnit').value = formSource.unit || 'USDT';
+    document.getElementById('prCur').value = formSource.default_currency || 'USD';
+    document.getElementById('prDesc').value = formSource.description || '';
+    document.getElementById('prRemark').value = formSource.remark || '';
+    if (copying) {
+      const codeEl = document.getElementById('prCode');
+      if (codeEl) {
+        codeEl.value = '';
+        codeEl.focus();
+      }
+    }
+  }
+}
+
+function editProduct(id) {
+  editingProductId = id;
+  copyingProductId = null;
+  products();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function copyProduct(id) {
+  const p = productsCache.find((x) => x.id === id);
+  if (!p) return;
+  editingProductId = null;
+  copyingProductId = id;
+  products();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelProductEdit() {
+  editingProductId = null;
+  copyingProductId = null;
+  products();
+}
+
+async function saveProduct() {
+  const payload = {
+    code: document.getElementById('prCode')?.value,
+    name: document.getElementById('prName')?.value,
+    unit: document.getElementById('prUnit')?.value,
+    default_currency: document.getElementById('prCur')?.value,
+    description: document.getElementById('prDesc')?.value || null,
+    remark: document.getElementById('prRemark')?.value || '',
+  };
+  const editId = editingProductId || document.getElementById('productEditId')?.value || '';
+  try {
+    if (editId) {
+      // Edit: code is immutable — same as parties
+      delete payload.code;
+      await api(`/admin/api/products/${editId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      flash(t('products.updated'));
+    } else {
+      const code = String(payload.code || '').trim();
+      if (!code) {
+        flash(t('products.codeRequired'));
+        return;
+      }
+      if (copyingProductId) {
+        const src = productsCache.find((x) => x.id === copyingProductId);
+        if (src && String(src.code).toLowerCase() === code.toLowerCase()) {
+          flash(t('products.codeMustDiffer'));
+          return;
+        }
+      }
+      await api('/admin/api/products', { method: 'POST', body: JSON.stringify(payload) });
+      flash(copyingProductId ? t('products.copied') : t('products.saved'));
+    }
+    editingProductId = null;
+    copyingProductId = null;
+    products();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('products.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+async function createProduct() {
+  return saveProduct();
+}
+
+async function deleteProduct(id, code) {
+  if (!confirm(t('products.deleteConfirm', { code }))) return;
+  try {
+    await api(`/admin/api/products/${id}`, { method: 'DELETE', body: '{}' });
+    if (editingProductId === id) editingProductId = null;
+    if (copyingProductId === id) copyingProductId = null;
+    flash(t('products.deleted'));
+    products();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('products.') ? t(msg) : msg || t('error.generic'));
+  }
 }
 
 async function mappings() {
   const [maps, sites, parties, products] = await Promise.all([
     api('/admin/api/mappings'), api('/admin/api/sites'), api('/admin/api/parties'), api('/admin/api/products')
   ]);
-  const opt = (items) => items.map(i=>`<option value="${i.id}">${i.code}</option>`).join('');
+  mappingsCache = maps.items || [];
+  const siteList = sites.items || [];
+  const siteOpts = siteList.map((i) => `<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.code)})</option>`).join('');
+  const partyOpts = (kind) => (parties.items||[])
+    .filter((p) => !kind || p.kind === kind || p.kind === 'both')
+    .map((i) => `<option value="${i.id}" data-site="${i.site_id||''}">[${escHtml(i.site_code||'?')}] ${escHtml(i.code)} — ${escHtml(i.legal_name)}</option>`)
+    .join('');
+  const prodOpts = (products.items||[]).map((i) => `<option value="${i.id}">${escHtml(i.code)} — ${escHtml(i.name)}</option>`).join('');
+  const editing = editingMappingSiteId
+    ? mappingsCache.find((m) => m.site_id === editingMappingSiteId)
+    : null;
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('mappings.title')}</div><div class="pg-card-body">
-    <div class="pg-row">
-      <div><label class="pg-label">${t('mappings.site')}</label><select class="pg-select" id="mSite">${opt(sites.items)}</select></div>
-      <div><label class="pg-label">${t('mappings.seller')}</label><select class="pg-select" id="mSeller">${opt(parties.items)}</select></div>
-      <div><label class="pg-label">${t('mappings.buyer')}</label><select class="pg-select" id="mBuyer">${opt(parties.items)}</select></div>
-      <div><label class="pg-label">${t('mappings.product')}</label><select class="pg-select" id="mProduct">${opt(products.items)}</select></div>
+    <p class="pg-card-hint">${t('mappings.hint')}</p>
+    <div class="party-form-card" style="margin-top:.35rem">
+      <h3>${editing ? t('mappings.editTitle') : t('mappings.add')}</h3>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('mappings.site')}</label><select class="pg-select" id="mSite" onchange="filterMappingParties()" ${editing ? 'disabled' : ''}>${siteOpts}</select></div>
+        <div><label class="pg-label">${t('mappings.seller')}</label><select class="pg-select" id="mSeller">${partyOpts('seller')}</select></div>
+        <div><label class="pg-label">${t('mappings.buyer')}</label><select class="pg-select" id="mBuyer">${partyOpts('buyer')}</select></div>
+        <div><label class="pg-label">${t('mappings.product')}</label><select class="pg-select" id="mProduct">${prodOpts}</select></div>
+      </div>
+      <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="pg-btn pg-btn-primary" type="button" onclick="saveMapping()">${editing ? t('mappings.saveEdit') : t('mappings.save')}</button>
+        <button class="pg-btn ${editing ? '' : 'hidden'}" type="button" onclick="cancelMappingEdit()">${t('mappings.cancelEdit')}</button>
+      </div>
     </div>
-    <button class="pg-btn pg-btn-primary" onclick="saveMapping()">${t('mappings.save')}</button>
-    <table class="pg-table" style="margin-top:1rem"><thead><tr><th>${t('mappings.site')}</th><th>${t('mappings.seller')}</th><th>${t('mappings.buyer')}</th><th>${t('mappings.product')}</th></tr></thead>
-    <tbody>${maps.items.map(m=>`<tr><td>${m.site_code}</td><td class="mono">${m.seller_code}</td><td class="mono">${m.buyer_code}</td><td class="mono">${m.product_code}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <table class="pg-table mappings-table" style="margin-top:1rem"><thead><tr>
+      <th>${t('mappings.site')}</th><th>${t('mappings.seller')}</th><th>${t('mappings.buyer')}</th><th>${t('mappings.product')}</th><th class="inv-col-manage">${t('col.manage')}</th>
+    </tr></thead>
+    <tbody>${mappingsCache.map((m) => `<tr>
+      <td>${escHtml(m.site_code)}</td>
+      <td>${escHtml(m.seller_name||m.seller_code)} <span class="mono muted">(${escHtml(m.seller_code)})</span></td>
+      <td>${escHtml(m.buyer_name||m.buyer_code)} <span class="mono muted">(${escHtml(m.buyer_code)})</span></td>
+      <td>${escHtml(m.product_name||m.product_code)}</td>
+      <td style="white-space:nowrap">
+        <button class="pg-btn" style="margin:0" type="button" onclick="editMapping('${m.site_id}')">${t('mappings.edit')}</button>
+        <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteMapping('${m.site_id}','${escHtml(m.site_code)}')">${t('mappings.delete')}</button>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="5">${t('mappings.empty')}</td></tr>`}</tbody></table></div></div>`;
+  if (editing) {
+    document.getElementById('mSite').value = editing.site_id;
+    filterMappingParties();
+    document.getElementById('mSeller').value = editing.seller_party_id;
+    document.getElementById('mBuyer').value = editing.buyer_party_id;
+    document.getElementById('mProduct').value = editing.product_id;
+  } else {
+    filterMappingParties();
+  }
+}
+
+function filterMappingParties() {
+  const siteId = document.getElementById('mSite')?.value;
+  ['mSeller','mBuyer'].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    [...sel.options].forEach((o) => {
+      if (!o.value) return;
+      const match = !siteId || o.dataset.site === siteId || !o.dataset.site;
+      o.hidden = !match;
+    });
+    const visible = [...sel.options].find((o) => o.value && !o.hidden);
+    if (visible && sel.selectedOptions[0]?.hidden) sel.value = visible.value;
+  });
+}
+
+function editMapping(siteId) {
+  editingMappingSiteId = siteId;
+  mappings();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelMappingEdit() {
+  editingMappingSiteId = null;
+  mappings();
+}
+
+async function saveMapping() {
+  const siteId = document.getElementById('mSite')?.value;
+  if (!siteId) return;
+  try {
+    await api(`/admin/api/mappings/${siteId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        seller_party_id: document.getElementById('mSeller')?.value,
+        buyer_party_id: document.getElementById('mBuyer')?.value,
+        product_id: document.getElementById('mProduct')?.value,
+      }),
+    });
+    flash(editingMappingSiteId ? t('mappings.updated') : t('mappings.saved'));
+    editingMappingSiteId = null;
+    mappings();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('mappings.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+async function deleteMapping(siteId, siteCode) {
+  if (!confirm(t('mappings.deleteConfirm', { code: siteCode }))) return;
+  try {
+    await api(`/admin/api/mappings/${siteId}`, { method: 'DELETE', body: '{}' });
+    if (editingMappingSiteId === siteId) editingMappingSiteId = null;
+    flash(t('mappings.deleted'));
+    mappings();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('mappings.') ? t(msg) : msg || t('error.generic'));
+  }
 }
 
 async function users() {
   const data = await api('/admin/api/auth/users');
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('users.title')}</div><div class="pg-card-body">
+    <p class="pg-card-hint">${t('users.hint')}</p>
     <div class="pg-row">
       <div><label class="pg-label">${t('login.email')}</label><input class="pg-input" id="uEmail"/></div>
       <div><label class="pg-label">${t('users.name')}</label><input class="pg-input" id="uName"/></div>
+      <div><label class="pg-label">${t('users.alias')}</label><input class="pg-input" id="uAlias" placeholder="${escHtml(t('users.aliasPlaceholder'))}"/></div>
       <div><label class="pg-label">${t('users.role')}</label><select class="pg-select" id="uRole"><option value="hq">hq</option><option value="viewer">viewer</option></select></div>
+      <div><label class="pg-label">${t('users.otp')}</label><input class="pg-input" id="uOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"/></div>
     </div>
-    <button class="pg-btn pg-btn-primary" onclick="createUser()">${t('users.add')}</button>
-    <table class="pg-table" style="margin-top:1rem"><thead><tr>
-      <th>${t('login.email')}</th><th>${t('users.name')}</th><th>${t('users.role')}</th><th>OTP</th><th>${t('sites.active')}</th><th></th></tr></thead>
-    <tbody>${data.items.map(u=>`<tr>
-      <td class="mono">${u.email}</td><td>${u.name}</td><td>${u.role}</td><td>${u.totp_enabled}</td><td>${u.active}</td>
-      <td>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0 0">
+      <button class="pg-btn" type="button" onclick="requestUserOtp()">${t('users.sendOtp')}</button>
+      <button class="pg-btn pg-btn-primary" type="button" onclick="createUser()">${t('users.add')}</button>
+    </div>
+    <table class="pg-table users-table" style="margin-top:1rem"><thead><tr>
+      <th>${t('login.email')}</th>
+      <th>${t('users.name')}</th>
+      <th>${t('users.alias')}</th>
+      <th>${t('users.role')}</th>
+      <th>OTP</th>
+      <th>${t('sites.active')}</th>
+      <th class="inv-col-manage">${t('col.manage')}</th>
+    </tr></thead>
+    <tbody>${data.items.map(u=>`<tr class="${u.active?'':'inv-row-deleted'}">
+      <td class="mono">${escHtml(u.email)}</td>
+      <td>${escHtml(u.name||'')}</td>
+      <td class="mono">${escHtml(u.alias||'—')}</td>
+      <td>${escHtml(u.role)}</td>
+      <td>${u.totp_enabled}</td>
+      <td>${u.active}</td>
+      <td class="users-actions">
+        <button class="pg-btn" style="margin:0" onclick="editUserAlias('${u.id}','${escHtml(u.alias||'')}')">${t('users.editAlias')}</button>
         <button class="pg-btn" style="margin:0" onclick="resetPw('${u.id}')">${t('users.resetPw')}</button>
         <button class="pg-btn" style="margin:0" onclick="resetOtp('${u.id}')">${t('users.resetOtp')}</button>
         <button class="pg-btn" style="margin:0" onclick="toggleUser('${u.id}', ${!u.active})">${u.active?t('users.disable'):t('users.enable')}</button>
+        ${u.active?`<button class="pg-btn pg-btn-danger" style="margin:0" onclick="deleteUser('${u.id}')">${t('users.delete')}</button>`:''}
       </td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+async function requestUserOtp() {
+  const d = await api('/admin/api/auth/users/sensitive-otp', { method: 'POST', body: '{}' });
+  flash(d.mode === 'totp' ? t('users.otpTotpHint') : t('users.otpEmailSent', { email: d.emailMasked || '' }));
+}
+
+async function promptUserOtp() {
+  let otp = document.getElementById('uOtp')?.value?.trim() || '';
+  if (!otp) otp = prompt(t('users.otpPrompt')) || '';
+  return otp.trim();
+}
+
+async function createUser() {
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  const d = await api('/admin/api/auth/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: document.getElementById('uEmail')?.value,
+      name: document.getElementById('uName')?.value,
+      alias: document.getElementById('uAlias')?.value,
+      role: document.getElementById('uRole')?.value,
+      otp,
+    }),
+  });
+  flash(t('users.created', { pw: d.temporaryPassword }));
+  users();
+}
+
+async function editUserAlias(id, current) {
+  const alias = prompt(t('users.aliasPrompt'), current || '');
+  if (alias === null) return;
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  await api(`/admin/api/auth/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ alias, otp }),
+  });
+  flash(t('users.saved'));
+  users();
+}
+
+async function resetPw(id) {
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  const d = await api(`/admin/api/auth/users/${id}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ otp }),
+  });
+  flash(t('users.pwReset', { pw: d.temporaryPassword }));
+}
+
+async function resetOtp(id) {
+  if (!confirm(t('users.resetOtpConfirm'))) return;
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  await api(`/admin/api/auth/users/${id}/reset-otp`, {
+    method: 'POST',
+    body: JSON.stringify({ otp }),
+  });
+  users();
+}
+
+async function toggleUser(id, active) {
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  await api(`/admin/api/auth/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active, otp }),
+  });
+  users();
+}
+
+async function deleteUser(id) {
+  if (!confirm(t('users.deleteConfirm'))) return;
+  const otp = await promptUserOtp();
+  if (!otp) { flash(t('users.otpRequired')); return; }
+  await api(`/admin/api/auth/users/${id}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ otp }),
+  });
+  flash(t('users.deleteOk'));
+  users();
 }
 
 async function platform() {
@@ -882,11 +2585,11 @@ async function platform() {
     : `<p class="pg-hint" style="text-align:center;margin:0">—</p>`;
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('platform.title')}</div><div class="pg-card-body">
     <div class="pg-section-head" style="font-weight:700;margin-bottom:.5rem">${t('platform.brandCardTitle')}</div>
-    <p class="pg-hint">${t('platform.brandCardDesc')}</p>
+    <p class="pg-card-hint">${t('platform.brandCardDesc')}</p>
     <div class="pg-row">
       <div><label class="pg-label">${t('platform.siteName')}</label><input class="pg-input" id="pSiteName" value="${esc(c.siteName)}"/></div>
       <div><label class="pg-label">${t('platform.tabTitle')}</label><input class="pg-input" id="pTabTitle" value="${esc(c.tabTitle||'')}" placeholder="${esc(c.siteName)}"/>
-        <span class="pg-hint">${t('platform.tabTitleHint')}</span></div>
+        <p class="pg-card-hint">${t('platform.tabTitleHint')}</p></div>
     </div>
     <div class="pg-row" style="margin-top:.75rem">
       <div>
@@ -895,7 +2598,7 @@ async function platform() {
         <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadAuthLogo')}
           <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange="uploadBrand('auth-logo', this)"/>
         </label>
-        <p class="pg-hint">${t('platform.authLogoDesc')}</p>
+        <p class="pg-card-hint">${t('platform.authLogoDesc')}</p>
       </div>
       <div>
         <label class="pg-label">${t('platform.logoTitle')}</label>
@@ -903,7 +2606,7 @@ async function platform() {
         <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadLogo')}
           <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange="uploadBrand('logo', this)"/>
         </label>
-        <p class="pg-hint">${t('platform.logoDesc')}</p>
+        <p class="pg-card-hint">${t('platform.logoDesc')}</p>
       </div>
       <div>
         <label class="pg-label">${t('platform.favicon')}</label>
@@ -911,37 +2614,37 @@ async function platform() {
         <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadFavicon')}
           <input type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,.ico,image/jpeg,image/webp" hidden onchange="uploadBrand('favicon', this)"/>
         </label>
-        <p class="pg-hint">${t('platform.faviconDesc')}</p>
+        <p class="pg-card-hint">${t('platform.faviconDesc')}</p>
       </div>
     </div>
     <div style="margin-top:.75rem">
       <label class="pg-label">${t('platform.authMainText')}</label>
       <textarea class="pg-textarea" id="pAuthMain" rows="2">${esc(c.authMainText||'')}</textarea>
-      <p class="pg-hint">${t('platform.authMainTextDesc')}</p>
+      <p class="pg-card-hint">${t('platform.authMainTextDesc')}</p>
     </div>
     <div class="pg-card" style="margin-top:1rem;padding:.75rem;background:#f8fafc">
       <div style="font-weight:700;margin-bottom:.35rem">${t('platform.ogShareTitle')}</div>
-      <p class="pg-hint">${t('platform.ogShareDesc')}</p>
+      <p class="pg-card-hint">${t('platform.ogShareDesc')}</p>
       <div class="pg-row">
         <div><label class="pg-label">${t('platform.ogTitle')}</label><input class="pg-input" id="pOgTitle" value="${esc(c.ogTitle||'')}" placeholder="${esc(c.siteName)}"/>
-          <span class="pg-hint">${t('platform.ogTitleHint')}</span></div>
+          <p class="pg-card-hint">${t('platform.ogTitleHint')}</p></div>
       </div>
       <label class="pg-label">${t('platform.ogDescription')}</label>
       <textarea class="pg-textarea" id="pOgDesc" rows="2">${esc(c.ogDescription||'')}</textarea>
-      <span class="pg-hint">${t('platform.ogDescriptionHint')}</span>
+      <p class="pg-card-hint">${t('platform.ogDescriptionHint')}</p>
       <div style="margin-top:.75rem">
         <label class="pg-label">${t('platform.ogImage')}</label>
         <div class="pg-card" style="padding:.5rem;margin:.25rem 0;background:#fff">${preview(c.ogImageUrl || c.authLogoUrl, 72)}</div>
         <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadOgImage')}
           <input type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadBrand('og', this)"/>
         </label>
-        <p class="pg-hint">${t('platform.ogImageDesc')}</p>
+        <p class="pg-card-hint">${t('platform.ogImageDesc')}</p>
       </div>
     </div>
     <div style="margin-top:.75rem">
       <label class="pg-label">${t('platform.footerText')}</label>
       <input class="pg-input" id="pFooter" value="${esc(c.footerText||'')}"/>
-      <p class="pg-hint">${t('platform.footerTextHint')}</p>
+      <p class="pg-card-hint">${t('platform.footerTextHint')}</p>
     </div>
     <button class="pg-btn pg-btn-primary" onclick="saveBrandTexts()">${t('platform.saveBrand')}</button>
 
@@ -980,7 +2683,7 @@ async function platform() {
       <label style="font-size:12px">
         <input type="radio" name="pTsMode" value="banner" ${c.turnstileDisplayMode==='banner'?'checked':''}/> ${t('platform.turnstileModeBanner')}
       </label>
-      <p class="pg-hint">${t('platform.turnstileDisplayModeHint')}</p>
+      <p class="pg-card-hint">${t('platform.turnstileDisplayModeHint')}</p>
     </div>
     <div style="margin-top:.75rem">
       <button class="pg-btn pg-btn-primary" onclick="savePlatform()">${t('platform.save')}</button>
@@ -1054,16 +2757,6 @@ async function applyBranding() {
         authWrap.classList.remove('hidden');
       } else authWrap.classList.add('hidden');
     }
-    const mainText = document.getElementById('authMainText');
-    if (mainText) {
-      if (b.authMainText) {
-        mainText.textContent = b.authMainText;
-        mainText.classList.remove('hidden');
-      } else {
-        mainText.textContent = '';
-        mainText.classList.add('hidden');
-      }
-    }
     const footerText = String(b.footerText || '').trim() || b.siteName || t('app.brand');
     ['loginFooter', 'shellFooter'].forEach((id) => {
       const el = document.getElementById(id);
@@ -1073,14 +2766,183 @@ async function applyBranding() {
 }
 
 async function audit() {
-  content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('audit.title')}</div><div class="pg-card-body">
-    <div class="pg-row">
-      <div><label class="pg-label">${t('audit.from')}</label><input class="pg-input" id="aFrom" type="date"/></div>
-      <div><label class="pg-label">${t('audit.to')}</label><input class="pg-input" id="aTo" type="date"/></div>
+  const today = new Date();
+  const toDef = today.toISOString().slice(0, 10);
+  const fromDate = new Date(today);
+  fromDate.setDate(fromDate.getDate() - 30);
+  const fromDef = fromDate.toISOString().slice(0, 10);
+
+  content.innerHTML = `<div class="pg-card audit-page"><div class="pg-card-head">${t('audit.title')}</div><div class="pg-card-body">
+    <p class="pg-card-hint">${t('audit.hint')}</p>
+    <div class="pg-row" style="flex-wrap:wrap;gap:10px;align-items:end">
+      <div><label class="pg-label">${t('audit.from')}</label><input class="pg-input" id="aFrom" type="date" value="${fromDef}"/></div>
+      <div><label class="pg-label">${t('audit.to')}</label><input class="pg-input" id="aTo" type="date" value="${toDef}"/></div>
+      <div><label class="pg-label">${t('audit.category')}</label>
+        <select class="pg-input" id="aCat">
+          <option value="">${t('audit.categoryAll')}</option>
+          <option value="invoice">${t('audit.category.invoice')}</option>
+          <option value="admin">${t('audit.category.admin')}</option>
+          <option value="site">${t('audit.category.site')}</option>
+          <option value="master">${t('audit.category.master')}</option>
+          <option value="platform">${t('audit.category.platform')}</option>
+        </select>
+      </div>
+      <div style="min-width:180px"><label class="pg-label">${t('audit.q')}</label><input class="pg-input" id="aQ" placeholder="${t('audit.qPh')}"/></div>
+      <button class="pg-btn pg-btn-primary" type="button" id="aSearchBtn">${t('audit.search')}</button>
+      <button class="pg-btn" type="button" onclick="exportAudit('json')">${t('audit.exportJson')}</button>
+      <button class="pg-btn" type="button" onclick="exportAudit('csv')">${t('audit.exportCsv')}</button>
     </div>
-    <button class="pg-btn pg-btn-primary" onclick="exportAudit('json')">${t('audit.exportJson')}</button>
-    <button class="pg-btn" onclick="exportAudit('csv')">${t('audit.exportCsv')}</button>
+    <div id="aMeta" class="pg-card-hint" style="margin-top:12px"></div>
+    <div style="overflow:auto;margin-top:8px">
+      <table class="pg-table audit-table" id="aTable">
+        <thead><tr>
+          <th>${t('audit.col.time')}</th>
+          <th>${t('audit.col.action')}</th>
+          <th>${t('audit.col.who')}</th>
+          <th>${t('audit.col.site')}</th>
+          <th>${t('audit.col.invoice')}</th>
+          <th>${t('audit.col.detail')}</th>
+          <th>${t('audit.col.ip')}</th>
+        </tr></thead>
+        <tbody id="aBody"><tr><td colspan="7">${t('audit.loading')}</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pg-row" style="margin-top:12px;gap:8px;align-items:center">
+      <button class="pg-btn" type="button" id="aPrevBtn">${t('audit.prev')}</button>
+      <span id="aPageInfo" class="pg-card-hint"></span>
+      <button class="pg-btn" type="button" id="aNextBtn">${t('audit.next')}</button>
+    </div>
   </div></div>`;
+
+  window.__auditState = { offset: 0, limit: 50, total: 0 };
+  document.getElementById('aSearchBtn')?.addEventListener('click', () => {
+    window.__auditState.offset = 0;
+    loadAuditRows();
+  });
+  document.getElementById('aPrevBtn')?.addEventListener('click', () => {
+    window.__auditState.offset = Math.max(0, window.__auditState.offset - window.__auditState.limit);
+    loadAuditRows();
+  });
+  document.getElementById('aNextBtn')?.addEventListener('click', () => {
+    const st = window.__auditState;
+    if (st.offset + st.limit < st.total) {
+      st.offset += st.limit;
+      loadAuditRows();
+    }
+  });
+  document.getElementById('aQ')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      window.__auditState.offset = 0;
+      loadAuditRows();
+    }
+  });
+  await loadAuditRows();
+}
+
+function auditEventLabel(eventType) {
+  const key = 'audit.event.' + String(eventType || '');
+  const label = t(key);
+  return label === key ? eventType : label;
+}
+
+function auditDetailText(row) {
+  const d = row.detail_json || {};
+  const parts = [];
+  if (d.invoiceNo) parts.push(d.invoiceNo);
+  if (d.from && d.to) parts.push(`${d.from} → ${d.to}`);
+  if (d.amount != null && d.currency) parts.push(`${d.amount} ${d.currency}`);
+  else if (d.amount != null) parts.push(String(d.amount));
+  if (d.buyer) parts.push(`${t('audit.detail.buyer')}: ${d.buyer}`);
+  if (d.seller) parts.push(`${t('audit.detail.seller')}: ${d.seller}`);
+  if (d.product) parts.push(`${t('audit.detail.product')}: ${d.product}`);
+  if (d.ticketNo) parts.push(`${t('audit.detail.ticket')}: ${d.ticketNo}`);
+  if (d.transactionId) parts.push(`TX: ${d.transactionId}`);
+  if (d.email) parts.push(d.email);
+  if (d.code && !d.invoiceNo) parts.push(d.code);
+  if (d.name && !d.legalName) parts.push(d.name);
+  if (d.legalName) parts.push(d.legalName);
+  if (d.kind && (String(row.event_type || '').startsWith('site.seal') || String(row.event_type || '').startsWith('party.'))) {
+    parts.push(d.kind);
+  }
+  if (d.label) parts.push(d.label);
+  if (d.keyPrefix) parts.push(d.keyPrefix + '…');
+  if (d.asset) parts.push(d.asset);
+  if (d.locale) parts.push(d.locale);
+  if (d.target && !d.email) parts.push(String(d.target).slice(0, 8) + '…');
+  if (parts.length) return parts.join(' · ');
+  try {
+    const raw = JSON.stringify(d);
+    return raw === '{}' ? '—' : raw.length > 120 ? raw.slice(0, 117) + '…' : raw;
+  } catch {
+    return '—';
+  }
+}
+
+function auditWho(row) {
+  const label = (row.actor_label || '').trim();
+  const email = (row.actor_email || '').trim();
+  const typeKey = 'audit.actor.' + (row.actor_type || 'system');
+  const typeLabel = t(typeKey) === typeKey ? row.actor_type : t(typeKey);
+  if (label && email && label !== email) return `${label} (${email}) · ${typeLabel}`;
+  if (label) return `${label} · ${typeLabel}`;
+  if (row.actor_id) return `${row.actor_id} · ${typeLabel}`;
+  return typeLabel;
+}
+
+async function loadAuditRows() {
+  const st = window.__auditState || { offset: 0, limit: 50, total: 0 };
+  const from = document.getElementById('aFrom')?.value || '';
+  const to = document.getElementById('aTo')?.value || '';
+  const category = document.getElementById('aCat')?.value || '';
+  const q = document.getElementById('aQ')?.value?.trim() || '';
+  const params = new URLSearchParams({
+    limit: String(st.limit),
+    offset: String(st.offset),
+  });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (category) params.set('category', category);
+  if (q) params.set('q', q);
+  const body = document.getElementById('aBody');
+  if (body) body.innerHTML = `<tr><td colspan="7">${t('audit.loading')}</td></tr>`;
+  try {
+    const data = await api(`/admin/api/audit?${params.toString()}`);
+    st.total = data.total || 0;
+    st.limit = data.limit || st.limit;
+    st.offset = data.offset || 0;
+    window.__auditState = st;
+    const items = data.items || [];
+    const meta = document.getElementById('aMeta');
+    if (meta) meta.textContent = t('audit.meta', { total: st.total, shown: items.length });
+    const pageInfo = document.getElementById('aPageInfo');
+    const page = Math.floor(st.offset / st.limit) + 1;
+    const pages = Math.max(1, Math.ceil(st.total / st.limit));
+    if (pageInfo) pageInfo.textContent = t('audit.page', { page, pages });
+    if (!body) return;
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="7">${t('audit.empty')}</td></tr>`;
+      return;
+    }
+    body.innerHTML = items.map((row) => {
+      const important = String(row.event_type || '').startsWith('invoice.issued') ||
+        String(row.event_type || '') === 'invoice.reissued' ||
+        String(row.event_type || '') === 'invoice.voided';
+      const trStyle = important ? ' style="background:rgba(37,99,235,0.06)"' : '';
+      const when = row.created_at ? formatAccessTime(new Date(row.created_at)) : '—';
+      const inv = row.invoice_no || (row.detail_json && row.detail_json.invoiceNo) || '—';
+      return `<tr${trStyle}>
+        <td class="mono" style="white-space:nowrap">${esc(when)}</td>
+        <td><strong>${esc(auditEventLabel(row.event_type))}</strong><div class="mono" style="opacity:.65;font-size:11px">${esc(row.event_type)}</div></td>
+        <td>${esc(auditWho(row))}</td>
+        <td class="mono">${esc(row.site_code || '—')}</td>
+        <td class="mono">${esc(inv)}</td>
+        <td>${esc(auditDetailText(row))}</td>
+        <td class="mono">${esc(row.ip || '—')}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    if (body) body.innerHTML = `<tr><td colspan="7">${esc(e.message || t('error.generic'))}</td></tr>`;
+  }
 }
 
 function esc(s){
@@ -1091,18 +2953,88 @@ function esc(s){
     .replace(/"/g,'&quot;');
 }
 
-async function createSite(){ await api('/admin/api/sites',{method:'POST',body:JSON.stringify({code:siteCode.value,name:siteName.value,notes:siteNotes.value})}); sites(); }
+async function saveSite() {
+  const editId = document.getElementById('siteEditId')?.value || '';
+  const code = document.getElementById('siteCode')?.value?.trim() || '';
+  const name = document.getElementById('siteName')?.value?.trim() || '';
+  const notes = document.getElementById('siteNotes')?.value || '';
+  const active = document.getElementById('siteActive')?.value !== 'false';
+  if (!name) { flash(t('sites.nameRequired')); return; }
+  try {
+    if (editId) {
+      await api(`/admin/api/sites/${editId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, notes, active }),
+      });
+      flash(t('sites.updated'));
+    } else {
+      if (!code) { flash(t('sites.codeRequired')); return; }
+      await api('/admin/api/sites', {
+        method: 'POST',
+        body: JSON.stringify({ code, name, notes, active }),
+      });
+      flash(t('sites.created'));
+    }
+    sites();
+  } catch (e) {
+    flash(e.message || t('error.generic'));
+  }
+}
+
+function cancelSiteEdit() {
+  document.getElementById('siteEditId').value = '';
+  document.getElementById('siteCode').value = '';
+  document.getElementById('siteCode').disabled = false;
+  document.getElementById('siteName').value = '';
+  document.getElementById('siteNotes').value = '';
+  document.getElementById('siteActive').value = 'true';
+  document.getElementById('siteSaveBtn').textContent = t('sites.add');
+  document.getElementById('siteCancelBtn').classList.add('hidden');
+}
+
+async function editSite(siteId) {
+  const data = await api('/admin/api/sites');
+  const s = (data.items || []).find((x) => x.id === siteId);
+  if (!s) return;
+  document.getElementById('siteEditId').value = s.id;
+  document.getElementById('siteCode').value = s.code || '';
+  document.getElementById('siteCode').disabled = true;
+  document.getElementById('siteName').value = s.name || '';
+  document.getElementById('siteNotes').value = s.notes || '';
+  document.getElementById('siteActive').value = s.active === false ? 'false' : 'true';
+  document.getElementById('siteSaveBtn').textContent = t('sites.saveEdit');
+  document.getElementById('siteCancelBtn').classList.remove('hidden');
+  document.getElementById('siteName')?.focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteSite(siteId, code) {
+  if (!confirm(t('sites.deleteConfirm', { code }))) return;
+  try {
+    await api(`/admin/api/sites/${siteId}`, { method: 'DELETE', body: '{}' });
+    flash(t('sites.deleted'));
+    sites();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('sites.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+async function createSite(){ return saveSite(); }
 async function issueKey(siteId,code){ const d=await api(`/admin/api/sites/${siteId}/keys`,{method:'POST',body:JSON.stringify({label:'default'})}); flash(t('sites.keyIssued',{code,apiKey:d.apiKey,hmacSecret:d.hmacSecret})); listKeys(siteId); }
 async function listKeys(siteId){ const d=await api(`/admin/api/sites/${siteId}/keys`); keysBox.innerHTML=`<table class="pg-table"><thead><tr><th>Prefix</th><th>Label</th><th>${t('sites.active')}</th><th></th></tr></thead><tbody>${d.items.map(k=>`<tr><td class="mono">${k.key_prefix}…</td><td>${k.label}</td><td>${k.active}</td><td>${k.active?`<button class="pg-btn pg-btn-danger" style="margin:0" onclick="revokeKey('${k.id}','${siteId}')">${t('sites.revoke')}</button>`:''}</td></tr>`).join('')}</tbody></table>`; }
 async function revokeKey(id,siteId){ if(!confirm(t('sites.revokeConfirm')))return; await api(`/admin/api/keys/${id}/revoke`,{method:'POST',body:'{}'}); listKeys(siteId); }
-async function createParty(){ await api('/admin/api/parties',{method:'POST',body:JSON.stringify({code:pCode.value,kind:pKind.value,legal_name:pLegal.value,country:pCountry.value})}); parties(); }
-async function createProduct(){ await api('/admin/api/products',{method:'POST',body:JSON.stringify({code:prCode.value,name:prName.value,unit:prUnit.value,default_currency:prCur.value})}); products(); }
-async function saveMapping(){ await api(`/admin/api/mappings/${mSite.value}`,{method:'PUT',body:JSON.stringify({seller_party_id:mSeller.value,buyer_party_id:mBuyer.value,product_id:mProduct.value})}); mappings(); }
-async function reissue(id){ if(!confirm(t('invoices.reissueConfirm')))return; const d=await api(`/admin/api/invoices/${id}/reissue`,{method:'POST',body:'{}'}); flash('→ '+d.invoice.invoiceNo); invoices(); }
-async function createUser(){ const d=await api('/admin/api/auth/users',{method:'POST',body:JSON.stringify({email:uEmail.value,name:uName.value,role:uRole.value})}); flash(t('users.created',{pw:d.temporaryPassword})); users(); }
-async function resetPw(id){ const d=await api(`/admin/api/auth/users/${id}/reset-password`,{method:'POST',body:'{}'}); flash(t('users.pwReset',{pw:d.temporaryPassword})); }
-async function resetOtp(id){ if(!confirm(t('users.resetOtpConfirm')))return; await api(`/admin/api/auth/users/${id}/reset-otp`,{method:'POST',body:'{}'}); users(); }
-async function toggleUser(id,active){ await api(`/admin/api/auth/users/${id}`,{method:'PATCH',body:JSON.stringify({active})}); users(); }
+async function reissueInvoice(id) {
+  if (!confirm(t('invoices.reissueConfirm'))) return;
+  try {
+    const d = await api(`/admin/api/invoices/${id}/reissue`, { method: 'POST', body: '{}' });
+    flash(t('invoices.reissueOk', { no: d.invoice?.invoiceNo || d.invoice?.invoice_no || '' }));
+    invoices();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('api.error.') || msg.startsWith('invoices.') ? t(msg) : msg || t('error.generic'));
+  }
+}
 async function savePlatform(){
   await api('/admin/api/platform',{method:'PUT',body:JSON.stringify({
     publicDomain:pDomain.value, originIp:pOrigin.value, sslCertPath:pSsl.value,

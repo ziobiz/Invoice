@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS parties (
   email         TEXT,
   phone         TEXT,
   bank_info     TEXT,
+  signatory_name  TEXT,   -- buyer contact / seller signatory
+  signatory_title TEXT,
   extra_json    JSONB NOT NULL DEFAULT '{}'::jsonb,
   active        BOOLEAN NOT NULL DEFAULT TRUE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -105,7 +107,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   pdf_path              TEXT,
   pdf_hash              TEXT,
   created_by            TEXT NOT NULL DEFAULT 'system'
-                          CHECK (created_by IN ('system', 'admin')),
+                          CHECK (created_by IN ('system', 'admin', 'api')),
   reissued_from_id      UUID REFERENCES invoices(id),
   raw_payload           JSONB,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),

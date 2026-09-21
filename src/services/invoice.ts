@@ -1,8 +1,15 @@
 import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
+import { config } from '../config.js';
 import { nextInvoiceNo } from './numbering.js';
 import { generateInvoicePdf } from './pdf.js';
-import { writeAudit } from './crypto.js';
+import { writeAudit, randomToken } from './crypto.js';
+import { sealConfigFromSite, pdfDefaultsFromSite, type SiteSealRow } from './seal.js';
+
+function verifyUrlFor(token: string): string {
+  const base = (config.publicBaseUrl || '').replace(/\/$/, '') || 'http://localhost:3100';
+  return `${base}/verify/${encodeURIComponent(token)}`;
+}
 
 export type CompletedWebhookBody = {
   site: string;
@@ -31,7 +38,10 @@ type PartyRow = {
   tax_id: string | null;
   email: string | null;
   phone: string | null;
+  website?: string | null;
   bank_info: string | null;
+  signatory_name?: string | null;
+  signatory_title?: string | null;
 };
 
 type ProductRow = {
@@ -41,7 +51,19 @@ type ProductRow = {
   description: string | null;
   unit: string;
   default_currency: string;
+  remark?: string | null;
 };
+
+function lineRemark(
+  productRemark?: string | null,
+  ticketNo?: string | null,
+): string {
+  const fromProduct = String(productRemark || '').trim();
+  if (fromProduct) return fromProduct;
+  const ticket = String(ticketNo || '').trim();
+  if (ticket && !ticket.startsWith('SIM-')) return ticket;
+  return '';
+}
 
 function partySnap(p: PartyRow) {
   return {
@@ -53,14 +75,17 @@ function partySnap(p: PartyRow) {
     tax_id: p.tax_id,
     email: p.email,
     phone: p.phone,
+    website: p.website ?? null,
     bank_info: p.bank_info,
+    signatory_name: p.signatory_name ?? null,
+    signatory_title: p.signatory_title ?? null,
   };
 }
 
 async function resolveParties(
   client: PoolClient,
   siteId: string,
-  body: CompletedWebhookBody,
+  body: Partial<CompletedWebhookBody> = {},
 ) {
   const mapping = await client.query<{
     seller_party_id: string;
@@ -84,8 +109,9 @@ async function resolveParties(
 
   if (body.sellerEntityCode) {
     const r = await client.query<{ id: string }>(
-      `SELECT id FROM parties WHERE code = $1 AND active = TRUE`,
-      [body.sellerEntityCode],
+      `SELECT id FROM parties WHERE code = $1 AND active = TRUE AND (site_id = $2 OR site_id IS NULL)
+       ORDER BY CASE WHEN site_id = $2 THEN 0 ELSE 1 END LIMIT 1`,
+      [body.sellerEntityCode, siteId],
     );
     if (!r.rowCount) {
       throw Object.assign(new Error('api.error.sellerNotFound'), {
@@ -97,8 +123,9 @@ async function resolveParties(
   }
   if (body.buyerEntityCode) {
     const r = await client.query<{ id: string }>(
-      `SELECT id FROM parties WHERE code = $1 AND active = TRUE`,
-      [body.buyerEntityCode],
+      `SELECT id FROM parties WHERE code = $1 AND active = TRUE AND (site_id = $2 OR site_id IS NULL)
+       ORDER BY CASE WHEN site_id = $2 THEN 0 ELSE 1 END LIMIT 1`,
+      [body.buyerEntityCode, siteId],
     );
     if (!r.rowCount) {
       throw Object.assign(new Error('api.error.buyerNotFound'), {
@@ -182,10 +209,19 @@ export async function issueFromWebhook(opts: {
       name: product.name,
       description: product.description,
       unit: product.unit,
+      remark: product.remark ?? null,
     };
 
     const amount = body.amount;
     const currency = body.currency || product.default_currency;
+
+    const siteSeal = await client.query<SiteSealRow>(
+      `SELECT * FROM sites WHERE id = $1`,
+      [siteId],
+    );
+    const seal = sealConfigFromSite(siteSeal.rows[0], sellerSnapshot.legal_name);
+    const sitePdf = pdfDefaultsFromSite(siteSeal.rows[0]);
+    const verifyToken = randomToken(24);
 
     const pdf = await generateInvoicePdf({
       invoiceNo,
@@ -208,10 +244,13 @@ export async function issueFromWebhook(opts: {
           quantity: body.assetAmount || '1',
           amount,
           unit: body.asset || product.unit,
-          remark: body.ticketNo || body.transactionId,
+          remark: lineRemark(product.remark, body.ticketNo),
         },
       ],
       locale,
+      seal,
+      sitePdf,
+      verifyUrl: verifyUrlFor(verifyToken),
     });
 
     const inv = await client.query(
@@ -219,12 +258,12 @@ export async function issueFromWebhook(opts: {
          invoice_no, status, site_id, source_transaction_id, ticket_no, idempotency_key,
          issued_at, currency, amount, asset, asset_amount, buyer_ref, memo,
          seller_snapshot, buyer_snapshot, product_snapshot,
-         pdf_path, pdf_hash, created_by, raw_payload
+         pdf_path, pdf_hash, created_by, raw_payload, verify_token
        ) VALUES (
          $1,'issued',$2,$3,$4,$5,
          $6,$7,$8,$9,$10,$11,$12,
          $13::jsonb,$14::jsonb,$15::jsonb,
-         $16,$17,'system',$18::jsonb
+         $16,$17,'api',$18::jsonb,$19
        ) RETURNING *`,
       [
         invoiceNo,
@@ -245,6 +284,7 @@ export async function issueFromWebhook(opts: {
         pdf.relativePath,
         pdf.pdfHash,
         JSON.stringify(body),
+        verifyToken,
       ],
     );
 
@@ -273,7 +313,26 @@ export async function issueFromWebhook(opts: {
         eventType: 'invoice.issued' as const,
         siteId,
         invoiceId: invoice.id as string,
-        detail: { invoiceNo, idempotencyKey, transactionId: body.transactionId },
+        detail: {
+          invoiceNo,
+          idempotencyKey,
+          transactionId: body.transactionId,
+          amount,
+          currency,
+          ticketNo: body.ticketNo ?? null,
+          buyer:
+            (buyerSnapshot as { legal_name?: string; code?: string })?.legal_name ||
+            (buyerSnapshot as { code?: string })?.code ||
+            null,
+          seller:
+            (sellerSnapshot as { legal_name?: string; code?: string })?.legal_name ||
+            (sellerSnapshot as { code?: string })?.code ||
+            null,
+          product:
+            (productSnapshot as { name?: string; code?: string })?.name ||
+            (productSnapshot as { code?: string })?.code ||
+            null,
+        },
       },
     };
   }).then(async (result) => {
@@ -311,60 +370,97 @@ export async function reissueInvoice(invoiceId: string, adminId: string, ip?: st
       });
     }
 
-    const site = await client.query<{ code: string }>(
-      `SELECT code FROM sites WHERE id = $1`,
+    const site = await client.query<SiteSealRow>(
+      `SELECT * FROM sites WHERE id = $1`,
       [original.site_id],
     );
+    if (!site.rowCount) {
+      throw Object.assign(new Error('api.error.notFound'), {
+        status: 404,
+        errorKey: 'api.error.notFound',
+      });
+    }
     const siteCode = site.rows[0].code;
     const issuedAt = new Date();
     const year = issuedAt.getFullYear();
     const invoiceNo = await nextInvoiceNo(client, original.site_id, siteCode, year);
 
-    const seller = original.seller_snapshot;
-    const buyer = original.buyer_snapshot;
-    const product = original.product_snapshot;
+    // Latest buyer / supplier / product from site mapping (amount stays the same)
+    const { seller, buyer, product } = await resolveParties(client, original.site_id, {});
+    const sellerSnapshot = partySnap(seller);
+    const buyerSnapshot = partySnap(buyer);
+    const productSnapshot = {
+      code: product.code,
+      name: product.name,
+      description: product.description,
+      unit: product.unit,
+      remark: product.remark ?? null,
+    };
+
+    const amount = String(original.amount);
+    const qty =
+      original.asset_amount != null ? String(original.asset_amount) : '1';
+    const unit = original.asset || product.unit || 'EA';
+    const seal = sealConfigFromSite(site.rows[0], sellerSnapshot.legal_name);
+    const sitePdf = pdfDefaultsFromSite(site.rows[0]);
+    const verifyToken = randomToken(24);
 
     const pdf = await generateInvoicePdf({
       invoiceNo,
       issuedAt,
       currency: original.currency,
-      amount: String(original.amount),
+      amount,
       asset: original.asset,
       assetAmount: original.asset_amount != null ? String(original.asset_amount) : null,
       ticketNo: original.ticket_no,
       sourceTransactionId: original.source_transaction_id,
       sourceSite: siteCode,
       memo: original.memo,
-      seller,
-      buyer,
+      seller: sellerSnapshot,
+      buyer: buyerSnapshot,
       lineItems: [
         {
           item: product.name || product.code,
           description: product.description || product.name,
-          unitPrice: String(original.amount),
-          quantity: original.asset_amount != null ? String(original.asset_amount) : '1',
-          amount: String(original.amount),
-          unit: original.asset || product.unit || 'EA',
-          remark: original.ticket_no || original.source_transaction_id,
+          unitPrice: amount,
+          quantity: qty,
+          amount,
+          unit,
+          remark: lineRemark(product.remark, original.ticket_no),
         },
       ],
+      seal,
+      sitePdf,
+      verifyUrl: verifyUrlFor(verifyToken),
     });
 
-    await client.query(`UPDATE invoices SET status = 'reissued', updated_at = NOW() WHERE id = $1`, [
+    await client.query(`UPDATE invoices SET status = 'reissued', updated_at = NOW(),
+       last_actor_id = COALESCE($2::uuid, last_actor_id)
+     WHERE id = $1`, [
       original.id,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adminId)
+        ? adminId
+        : null,
     ]);
+
+    const actorUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adminId)
+        ? adminId
+        : null;
 
     const inv = await client.query(
       `INSERT INTO invoices (
          invoice_no, status, site_id, source_transaction_id, ticket_no, idempotency_key,
          issued_at, currency, amount, asset, asset_amount, buyer_ref, memo,
          seller_snapshot, buyer_snapshot, product_snapshot,
-         pdf_path, pdf_hash, created_by, reissued_from_id, raw_payload
+         pdf_path, pdf_hash, created_by, reissued_from_id, raw_payload, verify_token,
+         last_actor_id
        ) VALUES (
          $1,'issued',$2,$3,$4,$5,
          $6,$7,$8,$9,$10,$11,$12,
          $13::jsonb,$14::jsonb,$15::jsonb,
-         $16,$17,'admin',$18,$19::jsonb
+         $16,$17,'admin',$18,$19::jsonb,$20,
+         $21
        ) RETURNING *`,
       [
         invoiceNo,
@@ -379,13 +475,21 @@ export async function reissueInvoice(invoiceId: string, adminId: string, ip?: st
         original.asset_amount,
         original.buyer_ref,
         original.memo,
-        JSON.stringify(seller),
-        JSON.stringify(buyer),
-        JSON.stringify(product),
+        JSON.stringify(sellerSnapshot),
+        JSON.stringify(buyerSnapshot),
+        JSON.stringify(productSnapshot),
         pdf.relativePath,
         pdf.pdfHash,
         original.id,
-        JSON.stringify({ reissuedFrom: original.invoice_no }),
+        JSON.stringify({
+          reissuedFrom: original.invoice_no,
+          refreshedMaster: true,
+          sellerCode: seller.code,
+          buyerCode: buyer.code,
+          productCode: product.code,
+        }),
+        verifyToken,
+        actorUuid,
       ],
     );
 
@@ -393,10 +497,17 @@ export async function reissueInvoice(invoiceId: string, adminId: string, ip?: st
     await client.query(
       `INSERT INTO invoice_items (
          invoice_id, line_no, product_code, description, quantity, unit, unit_price, amount, currency
-       )
-       SELECT $1, line_no, product_code, description, quantity, unit, unit_price, amount, currency
-       FROM invoice_items WHERE invoice_id = $2`,
-      [invoice.id, original.id],
+       ) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        invoice.id,
+        product.code,
+        product.description || product.name,
+        qty,
+        unit,
+        original.amount,
+        original.amount,
+        original.currency,
+      ],
     );
 
     return { invoice, original, invoiceNo, siteId: original.site_id as string };
@@ -407,7 +518,14 @@ export async function reissueInvoice(invoiceId: string, adminId: string, ip?: st
       actorId: adminId,
       siteId,
       invoiceId: invoice.id,
-      detail: { from: original.invoice_no, to: invoiceNo },
+      detail: {
+        from: original.invoice_no,
+        to: invoiceNo,
+        amount: original.amount,
+        currency: original.currency,
+        ticketNo: original.ticket_no,
+        refreshedMaster: true,
+      },
       ip,
     });
     return invoice;

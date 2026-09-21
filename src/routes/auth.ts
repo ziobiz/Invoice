@@ -22,6 +22,38 @@ import {
 
 export const authRouter = Router();
 
+/** Verify TOTP (preferred) or email OTP for sensitive HQ actions */
+export async function assertSensitiveOtp(
+  req: import('express').Request,
+  res: import('express').Response,
+): Promise<boolean> {
+  const code = String(req.body?.otp || req.body?.otpCode || '').trim();
+  if (!code) {
+    jsonError(res, 400, 'api.error.otpRequired', req);
+    return false;
+  }
+  const adminId = req.session.adminId!;
+  const row = await query(`SELECT * FROM admins WHERE id = $1 AND active = TRUE`, [adminId]);
+  if (!row.rowCount) {
+    jsonError(res, 401, 'api.error.unauthorized', req);
+    return false;
+  }
+  const admin = row.rows[0];
+  if (admin.totp_enabled && admin.totp_secret) {
+    if (!verifyTotpCode(admin.totp_secret, code)) {
+      jsonError(res, 401, 'api.error.invalidOtp', req);
+      return false;
+    }
+    return true;
+  }
+  const ok = await verifyEmailOtp(adminId, 'sensitive', code);
+  if (!ok) {
+    jsonError(res, 401, 'api.error.invalidOtp', req);
+    return false;
+  }
+  return true;
+}
+
 function clientIp(req: import('express').Request): string | undefined {
   const cf = req.headers['cf-connecting-ip'];
   if (typeof cf === 'string' && cf.trim()) return cf.trim();
@@ -300,7 +332,7 @@ authRouter.post('/logout', (req, res) => {
 authRouter.get('/me', requireAdmin, async (req, res, next) => {
   try {
     const row = await query(
-      `SELECT id, email, name, role, totp_enabled, email_verified_at, last_login_at
+      `SELECT id, email, name, alias, role, totp_enabled, email_verified_at, last_login_at
        FROM admins WHERE id = $1 AND active = TRUE`,
       [req.session.adminId],
     );
@@ -328,11 +360,31 @@ authRouter.get('/session-info', requireAdmin, (req, res) => {
   res.json({ ip, serverTime: new Date().toISOString() });
 });
 
+/** HQ: request email OTP for sensitive user ops (when TOTP not enabled) */
+authRouter.post('/users/sensitive-otp', requireAdmin, requireHq, async (req, res, next) => {
+  try {
+    const admin = (await query(`SELECT * FROM admins WHERE id = $1`, [req.session.adminId])).rows[0];
+    if (!admin) {
+      jsonError(res, 401, 'api.error.unauthorized', req);
+      return;
+    }
+    if (admin.totp_enabled) {
+      res.json({ ok: true, mode: 'totp', hint: 'Use authenticator OTP' });
+      return;
+    }
+    const { code, expiresMinutes } = await issueEmailOtp(admin.id, 'sensitive');
+    await sendOtpEmail(admin.email, admin.name || admin.email, code, expiresMinutes);
+    res.json({ ok: true, mode: 'email', expiresMinutes, emailMasked: maskEmail(admin.email) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** HQ: list / create / reset */
 authRouter.get('/users', requireAdmin, requireHq, async (_req, res, next) => {
   try {
     const rows = await query(
-      `SELECT id, email, name, role, active, totp_enabled, email_verified_at, last_login_at, created_at
+      `SELECT id, email, name, alias, role, active, totp_enabled, email_verified_at, last_login_at, created_at
        FROM admins ORDER BY created_at DESC`,
     );
     res.json({ items: rows.rows });
@@ -343,16 +395,26 @@ authRouter.get('/users', requireAdmin, requireHq, async (_req, res, next) => {
 
 authRouter.post('/users', requireAdmin, requireHq, async (req, res, next) => {
   try {
+    if (!(await assertSensitiveOtp(req, res))) return;
     const email = String(req.body.email || '').trim().toLowerCase();
     const name = String(req.body.name || '').trim() || email;
+    const alias = String(req.body.alias || '').trim() || null;
     const role = req.body.role === 'viewer' ? 'viewer' : 'hq';
     const password = String(req.body.password || '').trim() || Math.random().toString(36).slice(2, 10);
     const hash = await bcrypt.hash(password, 12);
     const row = await query(
-      `INSERT INTO admins (email, password_hash, name, role, must_change_password)
-       VALUES ($1, $2, $3, $4, TRUE) RETURNING id, email, name, role, active, totp_enabled`,
-      [email, hash, name, role],
+      `INSERT INTO admins (email, password_hash, name, alias, role, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, TRUE)
+       RETURNING id, email, name, alias, role, active, totp_enabled`,
+      [email, hash, name, alias, role],
     );
+    await writeAudit({
+      eventType: 'admin.user_created',
+      actorType: 'admin',
+      actorId: req.session.adminId,
+      detail: { target: row.rows[0].id, email },
+      ip: req.ip,
+    });
     res.status(201).json({ user: row.rows[0], temporaryPassword: password });
   } catch (e) {
     next(e);
@@ -361,6 +423,7 @@ authRouter.post('/users', requireAdmin, requireHq, async (req, res, next) => {
 
 authRouter.post('/users/:id/reset-password', requireAdmin, requireHq, async (req, res, next) => {
   try {
+    if (!(await assertSensitiveOtp(req, res))) return;
     const password = String(req.body.password || '').trim() || Math.random().toString(36).slice(2, 10);
     const hash = await bcrypt.hash(password, 12);
     await query(
@@ -375,6 +438,7 @@ authRouter.post('/users/:id/reset-password', requireAdmin, requireHq, async (req
 
 authRouter.post('/users/:id/reset-otp', requireAdmin, requireHq, async (req, res, next) => {
   try {
+    if (!(await assertSensitiveOtp(req, res))) return;
     await query(
       `UPDATE admins SET totp_secret = NULL, totp_enabled = FALSE, totp_pending_secret = NULL, updated_at = NOW()
        WHERE id = $1`,
@@ -395,26 +459,67 @@ authRouter.post('/users/:id/reset-otp', requireAdmin, requireHq, async (req, res
 
 authRouter.patch('/users/:id', requireAdmin, requireHq, async (req, res, next) => {
   try {
-    const { name, role, active } = req.body;
+    if (!(await assertSensitiveOtp(req, res))) return;
+    const { name, alias, role, active } = req.body;
     const row = await query(
       `UPDATE admins SET
          name = COALESCE($2, name),
-         role = COALESCE($3, role),
-         active = COALESCE($4, active),
+         alias = CASE WHEN $6::boolean THEN $3 ELSE alias END,
+         role = COALESCE($4, role),
+         active = COALESCE($5, active),
          updated_at = NOW()
        WHERE id = $1
-       RETURNING id, email, name, role, active, totp_enabled`,
+       RETURNING id, email, name, alias, role, active, totp_enabled`,
       [
         req.params.id,
         name ?? null,
+        alias !== undefined ? String(alias).trim() || null : null,
         role === 'hq' || role === 'viewer' ? role : null,
         typeof active === 'boolean' ? active : null,
+        alias !== undefined,
       ],
     );
     if (!row.rowCount) {
       jsonError(res, 404, 'api.error.notFound', req);
       return;
     }
+    await writeAudit({
+      eventType: typeof active === 'boolean' && !active ? 'admin.user_disabled' : 'admin.user_updated',
+      actorType: 'admin',
+      actorId: req.session.adminId,
+      detail: { target: req.params.id, active },
+      ip: req.ip,
+    });
+    res.json({ user: row.rows[0] });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Soft-delete user (deactivate) — HQ + OTP */
+authRouter.delete('/users/:id', requireAdmin, requireHq, async (req, res, next) => {
+  try {
+    if (!(await assertSensitiveOtp(req, res))) return;
+    if (req.params.id === req.session.adminId) {
+      jsonError(res, 400, 'api.error.cannotDeleteSelf', req);
+      return;
+    }
+    const row = await query(
+      `UPDATE admins SET active = FALSE, updated_at = NOW()
+       WHERE id = $1 RETURNING id, email, name, alias, role, active`,
+      [req.params.id],
+    );
+    if (!row.rowCount) {
+      jsonError(res, 404, 'api.error.notFound', req);
+      return;
+    }
+    await writeAudit({
+      eventType: 'admin.user_deleted',
+      actorType: 'admin',
+      actorId: req.session.adminId,
+      detail: { target: req.params.id },
+      ip: req.ip,
+    });
     res.json({ user: row.rows[0] });
   } catch (e) {
     next(e);

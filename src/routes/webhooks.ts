@@ -3,6 +3,7 @@ import { requireApiKey, requireHmac } from '../middleware/auth.js';
 import { issueFromWebhook, type CompletedWebhookBody } from '../services/invoice.js';
 import { jsonError } from '../middleware/i18n.js';
 import { t } from '../i18n/index.js';
+import { resolvePdfLocale } from '../services/pdf.js';
 
 export const webhookRouter = Router();
 
@@ -43,7 +44,12 @@ webhookRouter.post(
         body: { ...body, site: req.siteAuth.siteCode, event: 'transaction.completed' },
         actorType: 'site',
         ip: req.ip,
-        locale: req.locale,
+        // Bank remittance PDFs default to English; optional body.lang / pdfLang overrides
+        locale: resolvePdfLocale(
+          (body as { lang?: string; pdfLang?: string }).pdfLang ||
+            (body as { lang?: string; pdfLang?: string }).lang ||
+            'en',
+        ),
       });
 
       res.status(result.idempotentReplay ? 200 : 201).json({

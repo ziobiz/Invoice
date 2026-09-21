@@ -13,6 +13,7 @@ import { webhookRouter } from './routes/webhooks.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { platformRouter } from './routes/platform.js';
 import { brandingRouter } from './routes/branding.js';
+import { verifyRouter } from './routes/verify.js';
 import { buildAdminHtml } from './services/branding.js';
 import { t, SUPPORTED_LOCALES } from './i18n/index.js';
 
@@ -81,6 +82,7 @@ app.use('/admin/api/auth', authRouter);
 app.use('/admin/api/platform', platformRouter);
 app.use('/admin/api', adminRouter);
 app.use('/v1/webhooks', webhookRouter);
+app.use('/verify', verifyRouter);
 app.use(invoicesRouter);
 
 const publicDir = path.join(process.cwd(), 'public');

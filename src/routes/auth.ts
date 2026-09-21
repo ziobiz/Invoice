@@ -22,11 +22,25 @@ import {
 
 export const authRouter = Router();
 
+function clientIp(req: import('express').Request): string | undefined {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0]?.trim();
+  }
+  return req.ip || req.socket?.remoteAddress || undefined;
+}
+
+/** 세션은 OTP/비밀번호 변경 등 전체 로그인 완료 시에만 부여한다. */
 async function finishLogin(
   req: import('express').Request,
   admin: { id: string; email: string; name: string; role: string } | Record<string, unknown>,
 ) {
   const a = admin as { id: string; email: string; name: string; role: string };
+  await new Promise<void>((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
   req.session.adminId = a.id;
   await query(`UPDATE admins SET last_login_at = NOW() WHERE id = $1`, [a.id]);
   await writeAudit({
@@ -34,7 +48,7 @@ async function finishLogin(
     actorType: 'admin',
     actorId: a.id,
     detail: { email: a.email },
-    ip: req.ip,
+    ip: clientIp(req),
   });
   return {
     admin: {
@@ -54,6 +68,7 @@ authRouter.get('/public-config', async (_req, res, next) => {
       siteName: cfg.siteName,
       turnstileEnabled: cfg.turnstileEnabled && Boolean(cfg.turnstileSiteKey),
       turnstileSiteKey: cfg.turnstileEnabled ? cfg.turnstileSiteKey : '',
+      turnstileDisplayMode: cfg.turnstileDisplayMode === 'banner' ? 'banner' : 'text',
       otpEnabled: cfg.otpEnabled,
       emailOtpEnabled: cfg.emailOtpEnabled,
     });
@@ -67,7 +82,7 @@ authRouter.post('/login', async (req, res, next) => {
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
     const turnstileToken = req.body.turnstileToken as string | undefined;
-    await assertTurnstile(turnstileToken, req.ip);
+    await assertTurnstile(turnstileToken, clientIp(req));
 
     const row = await query(`SELECT * FROM admins WHERE email = $1 AND active = TRUE`, [email]);
     if (!row.rowCount) {
@@ -286,10 +301,12 @@ authRouter.get('/me', requireAdmin, async (req, res, next) => {
   try {
     const row = await query(
       `SELECT id, email, name, role, totp_enabled, email_verified_at, last_login_at
-       FROM admins WHERE id = $1`,
+       FROM admins WHERE id = $1 AND active = TRUE`,
       [req.session.adminId],
     );
     if (!row.rowCount) {
+      // 잔여 세션 쿠키 제거 — 비활성/삭제 사용자로 관리 창이 열리지 않게
+      req.session.destroy(() => undefined);
       jsonError(res, 401, 'api.error.unauthorized', req);
       return;
     }

@@ -268,16 +268,35 @@ adminRouter.get('/invoices', async (req, res, next) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Number(req.query.offset) || 0;
     const site = req.query.site ? String(req.query.site) : null;
+    const sandboxRaw = String(req.query.sandbox || 'all').toLowerCase();
+    const sandbox =
+      sandboxRaw === 'yes' || sandboxRaw === 'true' || sandboxRaw === '1'
+        ? 'yes'
+        : sandboxRaw === 'no' || sandboxRaw === 'false' || sandboxRaw === '0'
+          ? 'no'
+          : 'all';
     const rows = await query(
-      `SELECT i.*, s.code AS site_code
+      `SELECT i.*, s.code AS site_code,
+              (i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%') AS is_sandbox
        FROM invoices i
        JOIN sites s ON s.id = i.site_id
        WHERE ($1::text IS NULL OR s.code = $1)
+         AND (
+           $2::text = 'all'
+           OR ($2::text = 'yes' AND i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%')
+           OR ($2::text = 'no' AND (i.memo IS NULL OR i.memo NOT LIKE '[SANDBOX]%'))
+         )
        ORDER BY i.issued_at DESC
-       LIMIT $2 OFFSET $3`,
-      [site, limit, offset],
+       LIMIT $3 OFFSET $4`,
+      [site, sandbox, limit, offset],
     );
-    res.json({ items: rows.rows });
+    res.json({
+      items: rows.rows.map((r) => ({
+        ...r,
+        is_sandbox: Boolean(r.is_sandbox),
+      })),
+      sandbox,
+    });
   } catch (e) {
     next(e);
   }

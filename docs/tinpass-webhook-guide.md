@@ -136,6 +136,22 @@ POST /v1/invoices/:id/reissue
 | 4xx (서명/키/매핑) | 수정 후 동일 멱등키로 재시도 가능. 로직 알림 |
 | 5xx / 네트워크 | 지수 백오프 재시도, **동일 Idempotency-Key 유지** |
 
+## TINPASS (Crypto) 운영 연동
+
+Crypto 백엔드는 USDT 매입 상태가 `COMPLETED`로 전이될 때 위 웹훅을 자동 송신합니다.
+
+서버 `backend/.env` (Git 금지):
+
+```
+INVOICE_BASE_URL=https://invoice.icopay.net
+INVOICE_API_KEY=...
+INVOICE_HMAC_SECRET=...
+INVOICE_SITE_CODE=tinpass
+INVOICE_WEBHOOK_ENABLED=true
+```
+
+키 발급: Invoice 서버에서 `scripts/remote-issue-tinpass-key.sh` (또는 Admin → Sites → Issue key).
+
 ## curl 스모크 테스트
 
 ```bash

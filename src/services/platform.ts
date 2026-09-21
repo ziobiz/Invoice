@@ -6,6 +6,20 @@ import { sha256, randomToken } from './crypto.js';
 
 export type PlatformConfig = {
   siteName: string;
+  /** 브라우저 탭 제목 — 비우면 siteName */
+  tabTitle: string;
+  /** LINE·메신저 링크 미리보기 제목 */
+  ogTitle: string;
+  /** LINE·메신저 링크 미리보기 설명 */
+  ogDescription: string;
+  logoUrl: string;
+  authLogoUrl: string;
+  faviconUrl: string;
+  authBackgroundUrl: string;
+  ogImageUrl: string;
+  authMainText: string;
+  footerText: string;
+  linkPreviewRevision: number;
   publicDomain: string;
   originIp: string;
   sslCertPath: string;
@@ -25,12 +39,25 @@ export type PlatformConfig = {
   turnstileSiteKey: string;
   turnstileSecretKey: string;
   turnstileEnabled: boolean;
+  /** banner = 위젯 배너, text = 글(상태문구) + interaction-only */
+  turnstileDisplayMode: 'banner' | 'text';
   cfApiToken: string;
   cfZoneId: string;
 };
 
 const DEFAULTS: PlatformConfig = {
   siteName: 'Invoice Service',
+  tabTitle: '',
+  ogTitle: '',
+  ogDescription: '',
+  logoUrl: '',
+  authLogoUrl: '',
+  faviconUrl: '',
+  authBackgroundUrl: '',
+  ogImageUrl: '',
+  authMainText: '',
+  footerText: '',
+  linkPreviewRevision: 0,
   publicDomain: 'invoice.icopay.net',
   originIp: '153.75.235.61',
   sslCertPath: '/etc/letsencrypt/live/invoice.icopay.net/fullchain.pem',
@@ -51,6 +78,9 @@ const DEFAULTS: PlatformConfig = {
   turnstileSiteKey: process.env.TURNSTILE_SITE_KEY ?? '',
   turnstileSecretKey: process.env.TURNSTILE_SECRET_KEY ?? '',
   turnstileEnabled: process.env.TURNSTILE_ENABLED === 'true',
+  turnstileDisplayMode: (process.env.TURNSTILE_DISPLAY_MODE === 'banner' ? 'banner' : 'text') as
+    | 'banner'
+    | 'text',
   cfApiToken: process.env.CF_API_TOKEN ?? '',
   cfZoneId: process.env.CF_ZONE_ID ?? '',
 };
@@ -60,7 +90,8 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
     `SELECT value_json FROM platform_settings WHERE key = 'platform'`,
   );
   if (!row.rowCount) return { ...DEFAULTS };
-  return { ...DEFAULTS, ...(row.rows[0].value_json as PlatformConfig) };
+  const { syncBrandingUrls } = await import('./branding.js');
+  return syncBrandingUrls({ ...DEFAULTS, ...(row.rows[0].value_json as PlatformConfig) });
 }
 
 export async function savePlatformConfig(
@@ -80,6 +111,12 @@ export async function savePlatformConfig(
         : cur.turnstileSecretKey,
     cfApiToken:
       patch.cfApiToken && patch.cfApiToken !== '********' ? patch.cfApiToken : cur.cfApiToken,
+    turnstileDisplayMode:
+      patch.turnstileDisplayMode === 'banner' || patch.turnstileDisplayMode === 'text'
+        ? patch.turnstileDisplayMode
+        : cur.turnstileDisplayMode === 'banner'
+          ? 'banner'
+          : 'text',
     otpExpireMinutes: clamp(patch.otpExpireMinutes ?? cur.otpExpireMinutes, 1, 60),
     sensitiveOtpExpireMinutes: clamp(
       patch.sensitiveOtpExpireMinutes ?? cur.sensitiveOtpExpireMinutes,
@@ -255,29 +292,45 @@ export async function assertTurnstile(token: string | undefined, ip?: string): P
   const cfg = await getPlatformConfig();
   if (!cfg.turnstileEnabled) return;
   if (!cfg.turnstileSecretKey) {
-    const err = Object.assign(new Error('api.error.turnstileConfig'), { status: 503, errorKey: 'api.error.turnstileConfig' });
+    const err = Object.assign(new Error('api.error.turnstileConfig'), {
+      status: 503,
+      errorKey: 'api.error.turnstileConfig',
+    });
     throw err;
   }
-  if (!token) {
+  const response = (token ?? '').trim();
+  if (!response) {
     const err = Object.assign(new Error('api.error.turnstileRequired'), {
       status: 400,
       errorKey: 'api.error.turnstileRequired',
     });
     throw err;
   }
-  const body = new URLSearchParams({
-    secret: cfg.turnstileSecretKey,
-    response: token,
-  });
-  if (ip) body.set('remoteip', ip);
-  const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-    method: 'POST',
-    body,
-  });
-  const data = (await res.json()) as { success?: boolean };
+  const body = new URLSearchParams();
+  body.set('secret', cfg.turnstileSecretKey);
+  body.set('response', response);
+  // remoteip 불일치로 siteverify 실패하는 경우 방지 — CF 헤더 IP만 전달
+  if (ip && !ip.includes('127.0.0.1') && ip !== '::1') {
+    body.set('remoteip', ip.replace(/^::ffff:/, ''));
+  }
+  let data: { success?: boolean; 'error-codes'?: string[] };
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    data = (await res.json()) as { success?: boolean; 'error-codes'?: string[] };
+  } catch {
+    const err = Object.assign(new Error('api.error.turnstileFailed'), {
+      status: 400,
+      errorKey: 'api.error.turnstileFailed',
+    });
+    throw err;
+  }
   if (!data.success) {
     const err = Object.assign(new Error('api.error.turnstileFailed'), {
-      status: 403,
+      status: 400,
       errorKey: 'api.error.turnstileFailed',
     });
     throw err;

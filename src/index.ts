@@ -12,9 +12,12 @@ import { adminRouter } from './routes/admin.js';
 import { webhookRouter } from './routes/webhooks.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { platformRouter } from './routes/platform.js';
+import { brandingRouter } from './routes/branding.js';
+import { buildAdminHtml } from './services/branding.js';
 import { t, SUPPORTED_LOCALES } from './i18n/index.js';
 
 fs.mkdirSync(config.pdfStorageDir, { recursive: true });
+fs.mkdirSync(path.resolve(process.env.UPLOAD_DIR ?? './uploads', 'branding'), { recursive: true });
 
 const app = express();
 const PgSession = connectPgSimple(session);
@@ -44,7 +47,7 @@ app.use(
       httpOnly: true,
       sameSite: 'lax',
       secure: config.env === 'production' && config.publicBaseUrl.startsWith('https'),
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      // 브라우저 세션 쿠키만 — 종료 후 재접속 시 로그인 없이 관리 창이 열리지 않음 (Crypto localStorage 잔여 사고 방지)
     },
   }),
 );
@@ -73,6 +76,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.use('/api/branding', brandingRouter);
 app.use('/admin/api/auth', authRouter);
 app.use('/admin/api/platform', platformRouter);
 app.use('/admin/api', adminRouter);
@@ -81,9 +85,18 @@ app.use(invoicesRouter);
 
 const publicDir = path.join(process.cwd(), 'public');
 app.use(express.static(publicDir));
-app.get('/admin', (_req, res) => {
-  res.sendFile(path.join(publicDir, 'admin.html'));
-});
+
+async function sendBrandedAdmin(_req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const template = fs.readFileSync(path.join(publicDir, 'admin.html'), 'utf8');
+    const html = await buildAdminHtml(template);
+    res.type('html').send(html);
+  } catch (e) {
+    next(e);
+  }
+}
+
+app.get('/admin', sendBrandedAdmin);
 app.get('/', (_req, res) => {
   res.redirect('/admin');
 });

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { requireAdmin, requireHq } from '../middleware/auth.js';
 import {
   fetchCloudflareStatus,
@@ -9,11 +10,17 @@ import {
   savePlatformConfig,
   sendOtpEmail,
 } from '../services/platform.js';
+import { saveBrandingAsset, type BrandAsset } from '../services/branding.js';
 import { writeAudit } from '../services/crypto.js';
 import { query } from '../db/pool.js';
 
 export const platformRouter = Router();
 platformRouter.use(requireAdmin);
+
+const brandUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 platformRouter.get('/', async (_req, res, next) => {
   try {
@@ -53,6 +60,56 @@ platformRouter.put('/', requireHq, async (req, res, next) => {
     next(e);
   }
 });
+
+function brandUploadRoute(asset: BrandAsset) {
+  return async (
+    req: import('express').Request,
+    res: import('express').Response,
+    next: import('express').NextFunction,
+  ) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'file required' });
+        return;
+      }
+      const cfg = await saveBrandingAsset(asset, {
+        buffer: req.file.buffer,
+        originalname: req.file.originalname,
+      });
+      await writeAudit({
+        eventType: 'platform.branding.upload',
+        actorType: 'admin',
+        actorId: req.session.adminId,
+        detail: { asset, filename: req.file.originalname },
+        ip: req.ip,
+      });
+      res.json({ config: maskSecrets(cfg), asset });
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+
+platformRouter.post('/branding/logo', requireHq, brandUpload.single('file'), brandUploadRoute('logo'));
+platformRouter.post(
+  '/branding/auth-logo',
+  requireHq,
+  brandUpload.single('file'),
+  brandUploadRoute('auth-logo'),
+);
+platformRouter.post(
+  '/branding/favicon',
+  requireHq,
+  brandUpload.single('file'),
+  brandUploadRoute('favicon'),
+);
+platformRouter.post(
+  '/branding/background',
+  requireHq,
+  brandUpload.single('file'),
+  brandUploadRoute('background'),
+);
+platformRouter.post('/branding/og', requireHq, brandUpload.single('file'), brandUploadRoute('og'));
 
 platformRouter.post('/email/test', requireHq, async (req, res, next) => {
   try {
@@ -97,8 +154,16 @@ platformRouter.get('/dashboard', async (_req, res, next) => {
       checklist: [
         { id: 'dns', labelKey: 'dash.cf.dns', done: true },
         { id: 'proxy', labelKey: 'dash.cf.proxy', done: Boolean(cf.configured && cf.records?.length) },
-        { id: 'sslFull', labelKey: 'dash.cf.sslFull', done: ssl.status === 'ok' || ssl.status === 'expiring' },
-        { id: 'turnstile', labelKey: 'dash.cf.turnstile', done: cfg.turnstileEnabled && Boolean(cfg.turnstileSiteKey) },
+        {
+          id: 'sslFull',
+          labelKey: 'dash.cf.sslFull',
+          done: ssl.status === 'ok' || ssl.status === 'expiring',
+        },
+        {
+          id: 'turnstile',
+          labelKey: 'dash.cf.turnstile',
+          done: cfg.turnstileEnabled && Boolean(cfg.turnstileSiteKey),
+        },
         { id: 'smtp', labelKey: 'dash.cf.smtp', done: isSmtpConfigured(cfg) },
       ],
     });

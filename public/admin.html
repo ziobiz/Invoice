@@ -4,12 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice Service</title>
+  <!-- BRAND_META -->
   <link rel="stylesheet" href="/admin/crypto-shell.css" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body>
   <!-- LOGIN -->
   <div id="loginView" class="auth-wrap">
+    <div class="auth-wrap-main">
     <div class="auth-card">
       <div class="lang-inline">
         <span data-i18n="lang.label">Language</span>
@@ -22,16 +24,25 @@
         </select>
       </div>
       <h1 id="authTitle" data-i18n="login.title">Admin Login</h1>
+      <div id="authLogoWrap" class="hidden" style="text-align:center;margin:.5rem 0 .75rem">
+        <img id="authLogoImg" alt="" style="max-height:48px;max-width:100%;object-fit:contain" />
+      </div>
       <p class="sub" id="authSub" data-i18n="login.hint">HQ admin session</p>
+      <p class="sub hidden" id="authMainText" style="white-space:pre-wrap"></p>
       <div id="authError" class="auth-error hidden"></div>
 
       <form id="credForm" onsubmit="return handleCredentials(event)">
         <label class="pg-label" data-i18n="login.email">Email</label>
-        <input class="pg-input" id="loginEmail" type="email" value="admin@invoice.local" autocomplete="username" />
+        <input class="pg-input" id="loginEmail" type="email" autocomplete="username" />
         <label class="pg-label" data-i18n="login.password">Password</label>
         <input class="pg-input" id="loginPassword" type="password" autocomplete="current-password" />
-        <div id="turnstileBox" class="hidden" style="margin:.75rem 0"></div>
-        <button class="pg-btn pg-btn-primary" type="submit" style="width:100%" data-i18n="login.submit">Sign in</button>
+        <div id="turnstileBox" class="hidden" style="margin:.75rem 0">
+          <p id="turnstileWait" class="turnstile-wait-box hidden" data-i18n="auth.turnstileWait">Checking…</p>
+          <p id="turnstileOk" class="turnstile-ok hidden" data-i18n="auth.turnstileOk">Security check complete</p>
+          <p id="turnstileErr" class="auth-error hidden" data-i18n="auth.turnstileFailed">Security check failed</p>
+          <div id="turnstileHost"></div>
+        </div>
+        <button class="pg-btn pg-btn-primary" id="loginSubmitBtn" type="submit" style="width:100%" data-i18n="login.submit">Sign in</button>
       </form>
 
       <form id="changePwForm" class="hidden" onsubmit="return handleChangePw(event)">
@@ -56,14 +67,21 @@
         <div class="otp-boxes" id="loginOtpBoxes"></div>
       </div>
     </div>
+    </div>
+    <footer id="loginFooter" class="site-footer"></footer>
   </div>
 
-  <!-- SHELL (Crypto AppShell parity) -->
+  <!-- SHELL (ICOCARD structure + shared charcoal chrome) -->
   <div id="appView" class="pg-shell hidden">
     <aside class="pg-sidebar" id="sidebar">
-      <div class="pg-sidebar-logo"><span data-i18n="app.brand">Invoice</span></div>
+      <div class="pg-sidebar-logo"><img id="shellLogoImg" class="hidden" alt="" style="max-height:28px;max-width:100%;object-fit:contain" /><span id="shellLogoText" data-i18n="app.brand">Invoice</span></div>
+      <div class="pg-sidebar-collapse-wrap">
+        <button type="button" class="pg-sidebar-collapse" id="collapseBtn" onclick="toggleSidebar()">
+          <span id="collapseChev">«</span>
+          <span class="pg-sidebar-collapse-label" data-i18n="nav.collapse">Collapse</span>
+        </button>
+      </div>
       <nav class="pg-nav" id="sideNav"></nav>
-      <button class="pg-btn" style="margin:.5rem;background:transparent;border-color:rgba(255,255,255,.2);color:var(--shell-nav-idle)" onclick="toggleSidebar()" data-i18n="nav.collapse">Collapse</button>
     </aside>
     <div class="pg-shell-main">
       <header class="pg-session-bar">
@@ -74,13 +92,14 @@
         <div id="flash" class="flash hidden"></div>
         <div id="content" class="pg-stack"></div>
       </main>
+      <footer id="shellFooter" class="site-footer site-footer-shell"></footer>
     </div>
   </div>
 
 <script>
 let I18N = {}, LANG = localStorage.getItem('invoice_lang') || (navigator.language||'en').slice(0,2);
 if (!['ko','en','ja','th','zh'].includes(LANG)) LANG = 'en';
-let publicCfg = { turnstileEnabled: false, turnstileSiteKey: '' };
+let publicCfg = { turnstileEnabled: false, turnstileSiteKey: '', turnstileDisplayMode: 'text' };
 let turnstileWidgetId = null;
 let turnstileToken = '';
 let flow = { changeToken:'', emailToken:'', enrollToken:'', otpToken:'' };
@@ -93,6 +112,8 @@ let userMenuOpen = false;
 let shellTheme = localStorage.getItem('invoice_shell_theme') || 'dark';
 if (!['dark','default','light'].includes(shellTheme)) shellTheme = 'dark';
 let tabletMode = localStorage.getItem('invoice_tablet') === '1';
+let navExpanded = {};
+try { navExpanded = JSON.parse(localStorage.getItem('invoice_nav_expanded') || '{}'); } catch { navExpanded = {}; }
 
 const LANG_PILLS = [
   { code:'ko', short:'KR' },
@@ -107,16 +128,42 @@ const THEMES = [
   { id:'light', key:'theme.light' },
 ];
 
+const ICO = {
+  dashboard: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 13h6V4H4v9zm0 7h6v-5H4v5zm8 0h6V11h-6v9zm0-17v5h6V3h-6z"/></svg>',
+  invoices: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M7 3h8l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M15 3v4h4M9 13h6M9 17h6M9 9h2"/></svg>',
+  sites: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>',
+  parties: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="3"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a3 3 0 010 5.74"/></svg>',
+  products: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>',
+  mappings: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  users: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
+  platform: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  audit: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14 2H7a1 1 0 00-1 1v18a1 1 0 001 1h10a1 1 0 001-1V7l-5-5z"/><path d="M14 2v5h5M9 13h6M9 17h6M9 9h2"/></svg>',
+  group: '<svg fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+};
+
 const NAV = [
-  { id:'dashboard', key:'nav.dashboard' },
-  { id:'invoices', key:'nav.invoices' },
-  { id:'sites', key:'nav.sites' },
-  { id:'parties', key:'nav.parties' },
-  { id:'products', key:'nav.products' },
-  { id:'mappings', key:'nav.mappings' },
-  { id:'users', key:'nav.users' },
-  { id:'platform', key:'nav.platform' },
-  { id:'audit', key:'nav.audit' },
+  { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
+  { id:'invoices', key:'nav.invoices', icon:'invoices' },
+  { id:'sites', key:'nav.sites', icon:'sites' },
+  { id:'parties', key:'nav.parties', icon:'parties' },
+  { id:'products', key:'nav.products', icon:'products' },
+  { id:'mappings', key:'nav.mappings', icon:'mappings' },
+  { id:'users', key:'nav.users', icon:'users' },
+  { id:'platform', key:'nav.platform', icon:'platform' },
+  { id:'audit', key:'nav.audit', icon:'audit' },
+];
+
+/** ICOCARD식 그룹 메뉴 */
+const NAV_TREE = [
+  { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
+  {
+    id:'grp-ops', key:'nav.group.ops', icon:'group',
+    children: ['invoices','sites','parties','products','mappings'],
+  },
+  {
+    id:'grp-system', key:'nav.group.system', icon:'platform',
+    children: ['users','platform','audit'],
+  },
 ];
 
 function t(key, vars) {
@@ -143,11 +190,11 @@ function applyShellTheme() {
 }
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
-  document.title = t('app.title');
   document.documentElement.lang = LANG;
   const ls = document.getElementById('langSelect');
   if (ls) ls.value = LANG;
   if (!document.getElementById('appView').classList.contains('hidden')) renderSessionBar();
+  applyBranding();
 }
 async function loadI18n(lang) {
   I18N = await (await fetch('/locales/'+lang+'.json')).json();
@@ -187,52 +234,62 @@ function renderSessionBar() {
   const name = adminUser?.name || '';
   const email = adminUser?.email || '';
   bar.innerHTML = `
-    <span class="pg-session-meta-label" data-i18n="theme.label">${t('theme.label')}</span>
-    <span class="pg-theme-pill">
-      ${THEMES.map(th => `<button type="button" class="pg-theme-btn ${shellTheme===th.id?'pg-theme-btn-active':'pg-theme-btn-idle'}" onclick="setTheme('${th.id}')">${t(th.key)}</button>`).join('')}
-    </span>
-    ${pipe()}
-    <label class="pg-session-meta" style="cursor:pointer;gap:.4rem">
-      <span class="pg-session-meta-label">${t('session.tablet')}</span>
-      <button type="button" role="switch" aria-checked="${tabletMode}" class="pg-tablet-switch ${tabletMode?'on':''}" onclick="toggleTablet()"><span></span></button>
-    </label>
-    ${pipe()}
-    <span class="pg-session-pill" aria-label="${t('nav.language')}">
-      ${LANG_PILLS.map(p => `<button type="button" class="pg-session-lang ${LANG===p.code?'pg-session-lang-active':'pg-session-lang-idle'}" onclick="setLang('${p.code}')">${p.short}</button>`).join('')}
-    </span>
-    ${pipe()}
-    <span class="pg-session-meta">
-      <span class="pg-session-meta-label">${t('session.accessIp')}</span>
-      <span style="color:var(--shell-session-text-muted)">:</span>
-      <span class="pg-session-meta-value" id="sessionIpVal">${sessionIp}</span>
-    </span>
-    ${pipe()}
-    <span class="pg-session-meta">
-      <span class="pg-session-meta-label">${t('session.accessTime')}</span>
-      <span style="color:var(--shell-session-text-muted)">:</span>
-      <span class="pg-session-meta-value" id="sessionTimeVal">${formatAccessTime(new Date())}</span>
-    </span>
-    ${pipe()}
-    <div class="pg-user-menu" id="userMenuWrap">
-      <button type="button" class="pg-session-user" onclick="toggleUserMenu()" aria-expanded="${userMenuOpen}">
-        <span class="pg-session-user-glyph" aria-hidden="true">
-          <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
-        </span>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name} <span style="opacity:.45;margin:0 .15rem">|</span> ${roleLabel}</span>
-      </button>
-      ${userMenuOpen ? `<div class="pg-user-dropdown">
-        <div class="hd"><p class="n">${name}</p><p class="e">${email}</p></div>
-        <button type="button" class="item" onclick="logout()">${t('nav.logout')}</button>
-      </div>` : ''}
+    <div class="pg-session-scroll">
+      <span class="pg-session-meta-label">${t('theme.label')}</span>
+      <span class="pg-theme-pill">
+        ${THEMES.map(th => `<button type="button" class="pg-theme-btn ${shellTheme===th.id?'pg-theme-btn-active':'pg-theme-btn-idle'}" onclick="setTheme('${th.id}')">${t(th.key)}</button>`).join('')}
+      </span>
+      ${pipe()}
+      <label class="pg-session-meta" style="cursor:pointer;gap:.4rem">
+        <span class="pg-session-meta-label">${t('session.tablet')}</span>
+        <button type="button" role="switch" aria-checked="${tabletMode}" class="pg-tablet-switch ${tabletMode?'on':''}" onclick="toggleTablet()"><span></span></button>
+      </label>
+      ${pipe()}
+      <span class="pg-session-pill" aria-label="${t('nav.language')}">
+        ${LANG_PILLS.map(p => `<button type="button" class="pg-session-lang ${LANG===p.code?'pg-session-lang-active':'pg-session-lang-idle'}" onclick="setLang('${p.code}')">${p.short}</button>`).join('')}
+      </span>
+      ${pipe()}
+      <span class="pg-session-meta">
+        <span class="pg-session-meta-label">${t('session.accessIp')}</span>
+        <span style="color:var(--shell-session-text-muted)">:</span>
+        <span class="pg-session-meta-value" id="sessionIpVal">${sessionIp}</span>
+      </span>
+      ${pipe()}
+      <span class="pg-session-meta">
+        <span class="pg-session-meta-label">${t('session.accessTime')}</span>
+        <span style="color:var(--shell-session-text-muted)">:</span>
+        <span class="pg-session-meta-value" id="sessionTimeVal">${formatAccessTime(new Date())}</span>
+      </span>
     </div>
-    <button type="button" class="pg-session-close ${canClose?'pg-session-close-active':'pg-session-close-idle'}" ${canClose?'onclick="closeAllTabs()"':'disabled'} aria-disabled="${!canClose}">
-      <span aria-hidden="true">✕</span>
-      <span>${t('nav.closeAllLabel')}</span>
-    </button>`;
+    <div class="pg-session-actions">
+      ${pipe()}
+      <div class="pg-user-menu" id="userMenuWrap">
+        <button type="button" class="pg-session-user" onclick="toggleUserMenu(event)" aria-expanded="${userMenuOpen}">
+          <span class="pg-session-user-glyph" aria-hidden="true">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+          </span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:9rem">${name} <span style="opacity:.45;margin:0 .15rem">|</span> ${roleLabel}</span>
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div class="pg-user-dropdown ${userMenuOpen?'':'hidden'}" id="userDropdown" role="menu">
+          <div class="hd"><p class="n">${name}</p><p class="e">${email}</p></div>
+          <button type="button" class="item" onclick="logout()">${t('nav.logout')}</button>
+        </div>
+      </div>
+      <button type="button" class="pg-session-close ${canClose?'pg-session-close-active':'pg-session-close-idle'}" ${canClose?'onclick="closeAllTabs()"':'disabled'} aria-disabled="${!canClose}">
+        <span aria-hidden="true">✕</span>
+        <span>${t('nav.closeAllLabel')}</span>
+      </button>
+    </div>`;
 }
-function toggleUserMenu() {
+function toggleUserMenu(e) {
+  if (e) e.stopPropagation();
   userMenuOpen = !userMenuOpen;
-  renderSessionBar();
+  const dd = document.getElementById('userDropdown');
+  const btn = document.querySelector('.pg-session-user');
+  if (dd) dd.classList.toggle('hidden', !userMenuOpen);
+  if (btn) btn.setAttribute('aria-expanded', String(userMenuOpen));
+  // 드롭다운만 토글 — 전체 세션바 재렌더로 레이아웃이 밀리지 않게
 }
 function startSessionClock() {
   if (sessionClockTimer) clearInterval(sessionClockTimer);
@@ -294,38 +351,166 @@ function buildOtp(containerId, onComplete) {
 
 async function mountTurnstile() {
   const box = document.getElementById('turnstileBox');
+  const host = document.getElementById('turnstileHost');
+  const waitEl = document.getElementById('turnstileWait');
+  const okEl = document.getElementById('turnstileOk');
+  const errEl = document.getElementById('turnstileErr');
+  const btn = document.getElementById('loginSubmitBtn');
+  const mode = publicCfg.turnstileDisplayMode === 'banner' ? 'banner' : 'text';
+  destroyTurnstile();
+  turnstileToken = '';
   if (!publicCfg.turnstileEnabled || !publicCfg.turnstileSiteKey) {
-    box.classList.add('hidden'); return;
+    box.classList.add('hidden');
+    if (btn) btn.disabled = false;
+    return;
   }
-  box.classList.remove('hidden'); box.innerHTML = '';
-  const wait = () => new Promise(r => {
-    if (window.turnstile) return r();
-    const i = setInterval(() => { if (window.turnstile) { clearInterval(i); r(); } }, 100);
+  box.classList.remove('hidden');
+  waitEl.classList.toggle('hidden', mode === 'banner');
+  if (okEl) okEl.classList.add('hidden');
+  errEl.classList.add('hidden');
+  host.className = mode === 'banner' ? 'turnstile-host-banner' : 'turnstile-host-text';
+  if (btn) btn.disabled = true;
+  const waitApi = () => new Promise((resolve) => {
+    if (window.turnstile) return resolve();
+    const i = setInterval(() => { if (window.turnstile) { clearInterval(i); resolve(); } }, 100);
+    setTimeout(() => { clearInterval(i); resolve(); }, 15000);
   });
-  await wait();
-  turnstileWidgetId = window.turnstile.render(box, {
-    sitekey: publicCfg.turnstileSiteKey,
-    callback: (tok) => { turnstileToken = tok; },
-    'expired-callback': () => { turnstileToken = ''; },
+  await waitApi();
+  if (!window.turnstile || !host) {
+    waitEl.classList.add('hidden');
+    errEl.classList.remove('hidden');
+    errEl.textContent = t('auth.turnstileFailed');
+    return;
+  }
+  try {
+    const opts = {
+      sitekey: publicCfg.turnstileSiteKey,
+      theme: 'light',
+      size: 'flexible',
+      appearance: mode === 'text' ? 'interaction-only' : 'always',
+      callback: (tok) => {
+        turnstileToken = tok;
+        waitEl.classList.add('hidden');
+        errEl.classList.add('hidden');
+        if (okEl) {
+          if (mode === 'text') {
+            okEl.textContent = t('auth.turnstileOk');
+            okEl.classList.remove('hidden');
+          } else okEl.classList.add('hidden');
+        }
+        if (btn) btn.disabled = false;
+      },
+      'expired-callback': () => {
+        turnstileToken = '';
+        if (btn) btn.disabled = true;
+        if (okEl) okEl.classList.add('hidden');
+        if (mode === 'text') waitEl.classList.remove('hidden');
+      },
+      'error-callback': () => {
+        turnstileToken = '';
+        waitEl.classList.add('hidden');
+        if (okEl) okEl.classList.add('hidden');
+        errEl.classList.remove('hidden');
+        errEl.textContent = t('auth.turnstileFailed');
+        if (btn) btn.disabled = true;
+      },
+    };
+    turnstileWidgetId = window.turnstile.render(host, opts);
+  } catch {
+    waitEl.classList.add('hidden');
+    errEl.classList.remove('hidden');
+    errEl.textContent = t('auth.turnstileFailed');
+  }
+}
+function destroyTurnstile() {
+  try {
+    if (turnstileWidgetId != null && window.turnstile) {
+      window.turnstile.remove(turnstileWidgetId);
+    }
+  } catch { /* ignore */ }
+  turnstileWidgetId = null;
+  turnstileToken = '';
+  const host = document.getElementById('turnstileHost');
+  if (host) host.innerHTML = '';
+}
+function resetTurnstile() {
+  turnstileToken = '';
+  const btn = document.getElementById('loginSubmitBtn');
+  if (publicCfg.turnstileEnabled) {
+    if (btn) btn.disabled = true;
+    try {
+      if (turnstileWidgetId != null && window.turnstile) window.turnstile.reset(turnstileWidgetId);
+      else mountTurnstile();
+    } catch { mountTurnstile(); }
+  } else if (btn) btn.disabled = false;
+}
+
+function showLoginOnly() {
+  adminUser = null;
+  userMenuOpen = false;
+  if (sessionClockTimer) { clearInterval(sessionClockTimer); sessionClockTimer = null; }
+  document.getElementById('appView').classList.add('hidden');
+  document.getElementById('loginView').classList.remove('hidden');
+  document.getElementById('content').innerHTML = '';
+  document.getElementById('flash').classList.add('hidden');
+  showAuthStep('credForm');
+}
+
+function clearClientAuthResidue() {
+  // 인증 잔여값 제거 — 언어/테마만 localStorage에 유지 (Crypto localStorage 토큰 사고 방지)
+  ['token', 'invoice_token', 'invoice_admin', 'crypto-sensitive-token'].forEach((k) => {
+    try { localStorage.removeItem(k); } catch { /* ignore */ }
+    try { sessionStorage.removeItem(k); } catch { /* ignore */ }
   });
+  flow = { changeToken:'', emailToken:'', enrollToken:'', otpToken:'' };
+  turnstileToken = '';
+  adminUser = null;
+  openTabs = ['dashboard'];
+  activeTab = 'dashboard';
+  sessionIp = '—';
+}
+
+async function fetchPublicConfig() {
+  const r = await fetch('/admin/api/auth/public-config', {
+    credentials: 'same-origin',
+    headers: { 'Accept-Language': LANG },
+  });
+  if (!r.ok) throw new Error('public-config');
+  return r.json();
+}
+
+async function probeSession() {
+  const r = await fetch('/admin/api/auth/me', {
+    credentials: 'include',
+    headers: { 'Accept-Language': LANG },
+  });
+  if (!r.ok) return null;
+  const data = await r.json().catch(() => null);
+  if (!data?.admin?.id || !data.admin.email) return null;
+  return data.admin;
 }
 
 async function handleCredentials(e) {
   e.preventDefault(); setAuthError('');
   try {
     if (publicCfg.turnstileEnabled && !turnstileToken) {
-      setAuthError(t('api.error.turnstileRequired')); return false;
+      setAuthError(t('auth.turnstileRequired')); return false;
     }
     const data = await api('/admin/api/auth/login', {
       method:'POST',
       body: JSON.stringify({
-        email: loginEmail.value,
+        email: loginEmail.value.trim().toLowerCase(),
         password: loginPassword.value,
         turnstileToken: turnstileToken || undefined,
       })
     });
+    // 로그인 중간 단계에서는 절대 관리 셸을 열지 않음
+    loginPassword.value = '';
     await afterLoginStep(data);
-  } catch (err) { setAuthError(err.message); }
+  } catch (err) {
+    setAuthError(err.message);
+    resetTurnstile();
+  }
   return false;
 }
 async function handleChangePw(e) {
@@ -386,13 +571,29 @@ async function afterLoginStep(data) {
     });
     return;
   }
-  if (data.admin) boot(data.admin);
+  if (data.admin && data.admin.id && data.admin.email) {
+    // 전체 로그인 완료 응답에서만 셸 진입
+    boot(data.admin);
+    return;
+  }
+  // 알 수 없는 응답 — 셸 열지 않음
+  setAuthError(t('error.generic'));
+  showLoginOnly();
+  resetTurnstile();
 }
 
 function boot(admin) {
+  if (!admin?.id || !admin?.email) {
+    showLoginOnly();
+    return;
+  }
+  destroyTurnstile();
+  flow = { changeToken:'', emailToken:'', enrollToken:'', otpToken:'' };
+  turnstileToken = '';
   adminUser = admin;
-  loginView.classList.add('hidden');
-  appView.classList.remove('hidden');
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('appView').classList.remove('hidden');
+  try { sessionStorage.setItem('invoice_shell_ok', '1'); } catch { /* ignore */ }
   applyShellTheme();
   applyI18n();
   renderShell();
@@ -400,13 +601,60 @@ function boot(admin) {
   loadSessionIp();
   showTab('dashboard');
 }
-function toggleSidebar() { sidebar.classList.toggle('collapsed'); }
-async function logout() { await api('/admin/api/auth/logout', { method:'POST', body:'{}' }); location.reload(); }
+function toggleSidebar() {
+  sidebar.classList.toggle('collapsed');
+  const collapsed = sidebar.classList.contains('collapsed');
+  const chev = document.getElementById('collapseChev');
+  if (chev) chev.textContent = collapsed ? '»' : '«';
+}
+function navIcon(name) {
+  return `<span class="pg-nav-icon" aria-hidden="true">${ICO[name] || ICO.group}</span>`;
+}
+function saveNavExpanded() {
+  try { localStorage.setItem('invoice_nav_expanded', JSON.stringify(navExpanded)); } catch { /* ignore */ }
+}
+function toggleNavGroup(id) {
+  const willOpen = !navExpanded[id];
+  // 한 그룹만 펼침 (ICOCARD)
+  Object.keys(navExpanded).forEach((k) => { navExpanded[k] = false; });
+  navExpanded[id] = willOpen;
+  saveNavExpanded();
+  renderShell();
+}
+function renderSideNav() {
+  const parts = [];
+  for (const node of NAV_TREE) {
+    if (node.children) {
+      const open = Boolean(navExpanded[node.id]) || node.children.includes(activeTab);
+      if (node.children.includes(activeTab)) navExpanded[node.id] = true;
+      parts.push(`
+        <button type="button" class="pg-nav-group-btn ${open?'open':''}" onclick="toggleNavGroup('${node.id}')">
+          ${navIcon(node.icon)}
+          <span class="pg-nav-label">${t(node.key)}</span>
+          <span class="pg-nav-chevron">▾</span>
+        </button>
+        <div class="pg-nav-children ${open?'':'hidden'}">
+          ${node.children.map((cid) => {
+            const n = NAV.find((x) => x.id === cid);
+            if (!n) return '';
+            return `<button type="button" class="pg-nav-item ${activeTab===n.id?'active':''}" onclick="showTab('${n.id}')">
+              ${navIcon(n.icon)}
+              <span class="pg-nav-label">${t(n.key)}</span>
+            </button>`;
+          }).join('')}
+        </div>`);
+    } else {
+      parts.push(`<button type="button" class="pg-nav-item ${activeTab===node.id?'active':''}" onclick="showTab('${node.id}')">
+        ${navIcon(node.icon)}
+        <span class="pg-nav-label">${t(node.key)}</span>
+      </button>`);
+    }
+  }
+  sideNav.innerHTML = parts.join('');
+}
 
 function renderShell() {
-  sideNav.innerHTML = NAV.map(n =>
-    `<button class="${activeTab===n.id?'active':''}" onclick="showTab('${n.id}')">${t(n.key)}</button>`
-  ).join('');
+  renderSideNav();
   tabBar.innerHTML = openTabs.map(id => {
     const n = NAV.find(x=>x.id===id);
     const canClose = id !== 'dashboard' || openTabs.length > 1;
@@ -414,6 +662,30 @@ function renderShell() {
   }).join('');
   renderSessionBar();
 }
+
+async function logout() {
+  try {
+    await fetch('/admin/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+  } catch { /* ignore */ }
+  try { sessionStorage.removeItem('invoice_shell_ok'); } catch { /* ignore */ }
+  userMenuOpen = false;
+  clearClientAuthResidue();
+  destroyTurnstile();
+  showLoginOnly();
+  try {
+    publicCfg = await fetchPublicConfig();
+  } catch {
+    publicCfg = { turnstileEnabled: false, turnstileSiteKey: '', turnstileDisplayMode: 'text' };
+  }
+  await mountTurnstile();
+  applyI18n();
+}
+
 function closeTab(id) {
   if (id === 'dashboard' && openTabs.length === 1) return;
   openTabs = openTabs.filter(x => x !== id);
@@ -427,7 +699,10 @@ document.addEventListener('mousedown', (e) => {
   const wrap = document.getElementById('userMenuWrap');
   if (userMenuOpen && wrap && !wrap.contains(e.target)) {
     userMenuOpen = false;
-    renderSessionBar();
+    const dd = document.getElementById('userDropdown');
+    const btn = document.querySelector('.pg-session-user');
+    if (dd) dd.classList.add('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 });
 
@@ -478,18 +753,34 @@ async function dashboard() {
     </div>`;
 }
 
+let invoiceSandboxFilter = 'no';
+
 async function invoices() {
-  const data = await api('/admin/api/invoices?limit=100');
+  const data = await api(`/admin/api/invoices?limit=100&sandbox=${encodeURIComponent(invoiceSandboxFilter)}`);
+  const tab = (id, label) =>
+    `<button type="button" class="pg-btn ${invoiceSandboxFilter===id?'pg-btn-primary':''}" style="margin:0 .25rem .5rem 0;padding:.25rem .6rem" onclick="setInvoiceSandboxFilter('${id}')">${label}</button>`;
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('invoices.title')}</div><div class="pg-card-body">
+    <div>
+      ${tab('no', t('invoices.filter.live'))}
+      ${tab('yes', t('invoices.filter.sandbox'))}
+      ${tab('all', t('invoices.filter.all'))}
+    </div>
     <table class="pg-table"><thead><tr>
-      <th>${t('invoices.col.no')}</th><th>${t('invoices.col.site')}</th><th>${t('invoices.col.status')}</th>
+      <th>${t('invoices.col.no')}</th><th>${t('invoices.col.site')}</th><th>${t('invoices.col.kind')}</th><th>${t('invoices.col.status')}</th>
       <th>${t('invoices.col.amount')}</th><th>${t('invoices.col.tx')}</th><th></th></tr></thead>
     <tbody>${data.items.map(i=>`<tr>
-      <td class="mono">${i.invoice_no}</td><td>${i.site_code}</td><td>${i.status}</td>
+      <td class="mono">${i.invoice_no}</td><td>${i.site_code}</td>
+      <td>${i.is_sandbox ? `<span class="pg-badge" style="background:#fef3c7;color:#92400e">${t('invoices.badge.sandbox')}</span>` : t('invoices.badge.live')}</td>
+      <td>${i.status}</td>
       <td class="mono">${i.amount} ${i.currency}</td><td class="mono">${i.source_transaction_id}</td>
       <td><a href="/admin/api/invoices/${i.id}/pdf" target="_blank">${t('invoices.pdf')}</a>
       · <button class="pg-btn" style="margin:0;padding:.15rem .4rem" onclick="reissue('${i.id}')">${t('invoices.reissue')}</button></td>
-    </tr>`).join('') || `<tr><td colspan="6">${t('invoices.empty')}</td></tr>`}</tbody></table></div></div>`;
+    </tr>`).join('') || `<tr><td colspan="7">${t('invoices.empty')}</td></tr>`}</tbody></table></div></div>`;
+}
+
+function setInvoiceSandboxFilter(id) {
+  invoiceSandboxFilter = id;
+  invoices();
 }
 
 async function sites() {
@@ -576,10 +867,76 @@ async function users() {
 async function platform() {
   const d = await api('/admin/api/platform');
   const c = d.config;
+  const preview = (url, h=48) => url
+    ? `<img src="${esc(url)}?v=${Date.now()}" alt="" style="max-height:${h}px;max-width:100%;object-fit:contain;display:block;margin:0 auto" />`
+    : `<p class="pg-hint" style="text-align:center;margin:0">—</p>`;
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('platform.title')}</div><div class="pg-card-body">
-    <div class="pg-section-head" style="font-weight:700;margin-bottom:.5rem">${t('platform.domainSsl')}</div>
+    <div class="pg-section-head" style="font-weight:700;margin-bottom:.5rem">${t('platform.brandCardTitle')}</div>
+    <p class="pg-hint">${t('platform.brandCardDesc')}</p>
     <div class="pg-row">
       <div><label class="pg-label">${t('platform.siteName')}</label><input class="pg-input" id="pSiteName" value="${esc(c.siteName)}"/></div>
+      <div><label class="pg-label">${t('platform.tabTitle')}</label><input class="pg-input" id="pTabTitle" value="${esc(c.tabTitle||'')}" placeholder="${esc(c.siteName)}"/>
+        <span class="pg-hint">${t('platform.tabTitleHint')}</span></div>
+    </div>
+    <div class="pg-row" style="margin-top:.75rem">
+      <div>
+        <label class="pg-label">${t('platform.authLogo')}</label>
+        <div class="pg-card" style="padding:.5rem;margin:.25rem 0">${preview(c.authLogoUrl, 48)}</div>
+        <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadAuthLogo')}
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange="uploadBrand('auth-logo', this)"/>
+        </label>
+        <p class="pg-hint">${t('platform.authLogoDesc')}</p>
+      </div>
+      <div>
+        <label class="pg-label">${t('platform.logoTitle')}</label>
+        <div class="pg-card" style="padding:.5rem;margin:.25rem 0">${preview(c.logoUrl, 48)}</div>
+        <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadLogo')}
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange="uploadBrand('logo', this)"/>
+        </label>
+        <p class="pg-hint">${t('platform.logoDesc')}</p>
+      </div>
+      <div>
+        <label class="pg-label">${t('platform.favicon')}</label>
+        <div class="pg-card" style="padding:.5rem;margin:.25rem 0">${preview(c.faviconUrl, 32)}</div>
+        <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadFavicon')}
+          <input type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,.ico,image/jpeg,image/webp" hidden onchange="uploadBrand('favicon', this)"/>
+        </label>
+        <p class="pg-hint">${t('platform.faviconDesc')}</p>
+      </div>
+    </div>
+    <div style="margin-top:.75rem">
+      <label class="pg-label">${t('platform.authMainText')}</label>
+      <textarea class="pg-textarea" id="pAuthMain" rows="2">${esc(c.authMainText||'')}</textarea>
+      <p class="pg-hint">${t('platform.authMainTextDesc')}</p>
+    </div>
+    <div class="pg-card" style="margin-top:1rem;padding:.75rem;background:#f8fafc">
+      <div style="font-weight:700;margin-bottom:.35rem">${t('platform.ogShareTitle')}</div>
+      <p class="pg-hint">${t('platform.ogShareDesc')}</p>
+      <div class="pg-row">
+        <div><label class="pg-label">${t('platform.ogTitle')}</label><input class="pg-input" id="pOgTitle" value="${esc(c.ogTitle||'')}" placeholder="${esc(c.siteName)}"/>
+          <span class="pg-hint">${t('platform.ogTitleHint')}</span></div>
+      </div>
+      <label class="pg-label">${t('platform.ogDescription')}</label>
+      <textarea class="pg-textarea" id="pOgDesc" rows="2">${esc(c.ogDescription||'')}</textarea>
+      <span class="pg-hint">${t('platform.ogDescriptionHint')}</span>
+      <div style="margin-top:.75rem">
+        <label class="pg-label">${t('platform.ogImage')}</label>
+        <div class="pg-card" style="padding:.5rem;margin:.25rem 0;background:#fff">${preview(c.ogImageUrl || c.authLogoUrl, 72)}</div>
+        <label class="pg-btn" style="display:inline-block;margin:0;cursor:pointer">${t('platform.uploadOgImage')}
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadBrand('og', this)"/>
+        </label>
+        <p class="pg-hint">${t('platform.ogImageDesc')}</p>
+      </div>
+    </div>
+    <div style="margin-top:.75rem">
+      <label class="pg-label">${t('platform.footerText')}</label>
+      <input class="pg-input" id="pFooter" value="${esc(c.footerText||'')}"/>
+      <p class="pg-hint">${t('platform.footerTextHint')}</p>
+    </div>
+    <button class="pg-btn pg-btn-primary" onclick="saveBrandTexts()">${t('platform.saveBrand')}</button>
+
+    <div class="pg-section-head" style="font-weight:700;margin:1.25rem 0 .5rem">${t('platform.domainSsl')}</div>
+    <div class="pg-row">
       <div><label class="pg-label">${t('platform.domain')}</label><input class="pg-input" id="pDomain" value="${esc(c.publicDomain)}"/></div>
       <div><label class="pg-label">${t('platform.originIp')}</label><input class="pg-input" id="pOrigin" value="${esc(c.originIp)}"/></div>
       <div><label class="pg-label">${t('platform.sslPath')}</label><input class="pg-input" id="pSsl" value="${esc(c.sslCertPath)}"/></div>
@@ -605,11 +962,104 @@ async function platform() {
       <div><label class="pg-label">CF Zone ID</label><input class="pg-input" id="pCfZone" value="${esc(c.cfZoneId)}"/></div>
     </div>
     <label><input type="checkbox" id="pTsEn" ${c.turnstileEnabled?'checked':''}/> ${t('platform.turnstileEnabled')}</label>
+    <div style="margin-top:.65rem">
+      <span class="pg-label">${t('platform.turnstileDisplayMode')}</span>
+      <label style="margin-right:1rem;font-size:12px">
+        <input type="radio" name="pTsMode" value="text" ${(c.turnstileDisplayMode||'text')!=='banner'?'checked':''}/> ${t('platform.turnstileModeText')}
+      </label>
+      <label style="font-size:12px">
+        <input type="radio" name="pTsMode" value="banner" ${c.turnstileDisplayMode==='banner'?'checked':''}/> ${t('platform.turnstileModeBanner')}
+      </label>
+      <p class="pg-hint">${t('platform.turnstileDisplayModeHint')}</p>
+    </div>
     <div style="margin-top:.75rem">
       <button class="pg-btn pg-btn-primary" onclick="savePlatform()">${t('platform.save')}</button>
       <button class="pg-btn" onclick="testEmail()">${t('platform.testEmail')}</button>
     </div>
   </div></div>`;
+}
+
+async function uploadBrand(asset, input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/admin/api/platform/branding/' + asset, {
+      method: 'POST', credentials: 'include', body: fd, headers: { 'Accept-Language': LANG },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || t('error.generic'));
+    flash(t('platform.assetUploaded'));
+    await applyBranding();
+    platform();
+  } catch (err) {
+    flash(err.message || t('error.generic'));
+  }
+}
+
+async function saveBrandTexts() {
+  await api('/admin/api/platform', { method:'PUT', body: JSON.stringify({
+    siteName: pSiteName.value,
+    tabTitle: pTabTitle.value,
+    authMainText: pAuthMain.value,
+    ogTitle: pOgTitle.value,
+    ogDescription: pOgDesc.value,
+    footerText: pFooter.value,
+  })});
+  flash(t('platform.saved'));
+  await applyBranding();
+  platform();
+}
+
+async function applyBranding() {
+  try {
+    const b = await fetch('/api/branding', { credentials: 'same-origin' }).then((r) => r.json());
+    const title = b.tabTitle || b.siteName || t('app.title');
+    document.title = title;
+    if (b.faviconUrl) {
+      let link = document.querySelector('link[rel="icon"]');
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.href = b.faviconUrl;
+    }
+    const shellImg = document.getElementById('shellLogoImg');
+    const shellText = document.getElementById('shellLogoText');
+    if (shellImg && shellText) {
+      if (b.logoUrl) {
+        shellImg.src = b.logoUrl;
+        shellImg.classList.remove('hidden');
+        shellText.classList.add('hidden');
+      } else {
+        shellImg.classList.add('hidden');
+        shellText.classList.remove('hidden');
+        shellText.textContent = b.siteName || t('app.brand');
+      }
+    }
+    const authWrap = document.getElementById('authLogoWrap');
+    const authImg = document.getElementById('authLogoImg');
+    if (authWrap && authImg) {
+      if (b.authLogoUrl || b.logoUrl) {
+        authImg.src = b.authLogoUrl || b.logoUrl;
+        authWrap.classList.remove('hidden');
+      } else authWrap.classList.add('hidden');
+    }
+    const mainText = document.getElementById('authMainText');
+    if (mainText) {
+      if (b.authMainText) {
+        mainText.textContent = b.authMainText;
+        mainText.classList.remove('hidden');
+      } else {
+        mainText.textContent = '';
+        mainText.classList.add('hidden');
+      }
+    }
+    const footerText = String(b.footerText || '').trim() || b.siteName || t('app.brand');
+    ['loginFooter', 'shellFooter'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = footerText;
+    });
+  } catch { /* ignore */ }
 }
 
 async function audit() {
@@ -623,7 +1073,13 @@ async function audit() {
   </div></div>`;
 }
 
-function esc(s){ return String(s??'').replace(/"/g,'&quot;'); }
+function esc(s){
+  return String(s??'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
 
 async function createSite(){ await api('/admin/api/sites',{method:'POST',body:JSON.stringify({code:siteCode.value,name:siteName.value,notes:siteNotes.value})}); sites(); }
 async function issueKey(siteId,code){ const d=await api(`/admin/api/sites/${siteId}/keys`,{method:'POST',body:JSON.stringify({label:'default'})}); flash(t('sites.keyIssued',{code,apiKey:d.apiKey,hmacSecret:d.hmacSecret})); listKeys(siteId); }
@@ -639,11 +1095,12 @@ async function resetOtp(id){ if(!confirm(t('users.resetOtpConfirm')))return; awa
 async function toggleUser(id,active){ await api(`/admin/api/auth/users/${id}`,{method:'PATCH',body:JSON.stringify({active})}); users(); }
 async function savePlatform(){
   await api('/admin/api/platform',{method:'PUT',body:JSON.stringify({
-    siteName:pSiteName.value, publicDomain:pDomain.value, originIp:pOrigin.value, sslCertPath:pSsl.value,
+    publicDomain:pDomain.value, originIp:pOrigin.value, sslCertPath:pSsl.value,
     smtpHost:pSmtpHost.value, smtpPort:Number(pSmtpPort.value), smtpUser:pSmtpUser.value, smtpPassword:pSmtpPass.value,
     fromAddress:pFrom.value, otpExpireMinutes:Number(pOtpMin.value), sensitiveOtpExpireMinutes:Number(pSensMin.value),
     otpEnabled:pOtpEn.checked, emailOtpEnabled:pEmailOtpEn.checked,
     turnstileSiteKey:pTsSite.value, turnstileSecretKey:pTsSec.value, turnstileEnabled:pTsEn.checked,
+    turnstileDisplayMode: (document.querySelector('input[name="pTsMode"]:checked')||{}).value === 'banner' ? 'banner' : 'text',
     cfApiToken:pCfTok.value, cfZoneId:pCfZone.value
   })});
   flash(t('platform.saved')); platform();
@@ -652,17 +1109,42 @@ async function testEmail(){ const to=prompt(t('platform.testEmailTo')); if(!to)r
 function exportAudit(format){ window.open(`/admin/api/audit/export?from=${aFrom.value||'1970-01-01'}&to=${aTo.value||'2999-12-31'}&format=${format}&lang=${LANG}`,'_blank'); }
 
 (async function init(){
+  // 1) 항상 로그인 화면부터 — 잔여 키/상태로 관리 창이 먼저 보이지 않게
+  showLoginOnly();
   applyShellTheme();
   await loadI18n(LANG);
-  publicCfg = await api('/admin/api/auth/public-config');
-  await mountTurnstile();
+
   try {
-    const me = await api('/admin/api/auth/me');
-    boot(me.admin);
+    publicCfg = await fetchPublicConfig();
   } catch {
-    loginView.classList.remove('hidden');
-    showAuthStep('credForm');
+    publicCfg = { turnstileEnabled: false, turnstileSiteKey: '', turnstileDisplayMode: 'text' };
   }
+
+  // 2) 이 탭에서 로그인 완료 표시가 있을 때만 세션 복원 (Crypto sessionStorage 토큰과 동일 취지)
+  let tabOk = false;
+  try { tabOk = sessionStorage.getItem('invoice_shell_ok') === '1'; } catch { tabOk = false; }
+
+  if (tabOk) {
+    const admin = await probeSession().catch(() => null);
+    if (admin?.id && admin.email) {
+      boot(admin);
+      return;
+    }
+  }
+
+  // 쿠키만 있거나 탭 표시 없음 → 관리 창 금지, 서버 세션·클라이언트 잔여 정리
+  try { sessionStorage.removeItem('invoice_shell_ok'); } catch { /* ignore */ }
+  clearClientAuthResidue();
+  try {
+    await fetch('/admin/api/auth/logout', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch { /* ignore */ }
+
+  showLoginOnly();
+  await mountTurnstile();
+  applyI18n();
 })();
 </script>
 </body>

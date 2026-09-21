@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
 
-  const CURRENT_LIVE_VERSION = '1.2.11';
+  const CURRENT_LIVE_VERSION = '1.2.12';
 
   function L(ko, en, ja, zh, th) {
     return { ko, en, ja: ja || en, zh: zh || en, th: th || en };
@@ -10,6 +10,28 @@
 
   /** @type {{ version: string, kind: 'major'|'minor', date: string, items: Record<string,string[]> }[]} */
   const RELEASE_NOTES = [
+    {
+      version: '1.2.12',
+      kind: 'minor',
+      date: '2026-09-21',
+      items: {
+        ko: [
+          '「버전업 히스토리」→「업데이트기록」으로 명칭 변경, 시스템 메뉴에서 운영기록 아래로 이동.',
+        ],
+        en: [
+          'Renamed Version history → Update history; moved under System below Operation log.',
+        ],
+        ja: [
+          '「バージョン履歴」→「更新記録」に改称し、システム配下の運用記録の下へ移動。',
+        ],
+        zh: [
+          '「版本历史」改为「更新记录」，移至系统菜单运营记录下方。',
+        ],
+        th: [
+          'เปลี่ยนชื่อประวัติเวอร์ชัน → บันทึกอัปเดต และย้ายไว้ใต้ระบบ หลังบันทึกการดำเนินงาน',
+        ],
+      },
+    },
     {
       version: '1.2.11',
       kind: 'minor',

@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice Service</title>
   <!-- BRAND_META -->
-  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260921auditAlign1" />
+  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260921updNav1" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-  <script src="/admin/manuals.js?v=20260921auditAlign1"></script>
+  <script src="/admin/manuals.js?v=20260921updNav1"></script>
 </head>
 <body>
   <!-- LOGIN -->
@@ -159,7 +159,7 @@ const NAV = [
   { id:'updates', key:'nav.updates', icon:'updates' },
 ];
 
-/** ICOCARD식 그룹 메뉴 — 운영메뉴얼·버전업 히스토리는 시스템과 별도 최상위 */
+/** ICOCARD식 그룹 메뉴 — 운영메뉴얼은 시스템과 별도 최상위, 업데이트기록은 시스템(운영기록 아래) */
 const NAV_TREE = [
   { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
   {
@@ -168,10 +168,9 @@ const NAV_TREE = [
   },
   {
     id:'grp-system', key:'nav.group.system', icon:'platform',
-    children: ['users','platform','audit'],
+    children: ['users','platform','audit','updates'],
   },
   { id:'manuals', key:'nav.manuals', icon:'manuals' },
-  { id:'updates', key:'nav.updates', icon:'updates' },
 ];
 
 function t(key, vars) {
@@ -220,7 +219,7 @@ function applyI18n() {
   applyBranding();
 }
 async function loadI18n(lang) {
-  I18N = await (await fetch('/locales/'+lang+'.json?v=20260921auditAlign1')).json();
+  I18N = await (await fetch('/locales/'+lang+'.json?v=20260921updNav1')).json();
   LANG = lang; localStorage.setItem('invoice_lang', lang); applyI18n();
 }
 async function setLang(lang) {

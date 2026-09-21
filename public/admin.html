@@ -753,16 +753,26 @@ async function dashboard() {
     </div>`;
 }
 
-let invoiceSandboxFilter = 'no';
+let invoiceKindFilter = 'live';
 
 async function invoices() {
-  const data = await api(`/admin/api/invoices?limit=100&sandbox=${encodeURIComponent(invoiceSandboxFilter)}`);
+  const data = await api(`/admin/api/invoices?limit=100&kind=${encodeURIComponent(invoiceKindFilter)}`);
   const tab = (id, label) =>
-    `<button type="button" class="pg-btn ${invoiceSandboxFilter===id?'pg-btn-primary':''}" style="margin:0 .25rem .5rem 0;padding:.25rem .6rem" onclick="setInvoiceSandboxFilter('${id}')">${label}</button>`;
+    `<button type="button" class="pg-btn ${invoiceKindFilter===id?'pg-btn-primary':''}" style="margin:0 .25rem .5rem 0;padding:.25rem .6rem" onclick="setInvoiceKindFilter('${id}')">${label}</button>`;
+  const kindBadge = (i) => {
+    if (i.invoice_kind === 'simulator' || i.is_simulator) {
+      return `<span class="pg-badge" style="background:#e0e7ff;color:#3730a3">${t('invoices.badge.simulator')}</span>`;
+    }
+    if (i.invoice_kind === 'sandbox' || i.is_sandbox) {
+      return `<span class="pg-badge" style="background:#fef3c7;color:#92400e">${t('invoices.badge.sandbox')}</span>`;
+    }
+    return t('invoices.badge.live');
+  };
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('invoices.title')}</div><div class="pg-card-body">
     <div>
-      ${tab('no', t('invoices.filter.live'))}
-      ${tab('yes', t('invoices.filter.sandbox'))}
+      ${tab('live', t('invoices.filter.live'))}
+      ${tab('simulator', t('invoices.filter.simulator'))}
+      ${tab('sandbox', t('invoices.filter.sandbox'))}
       ${tab('all', t('invoices.filter.all'))}
     </div>
     <table class="pg-table"><thead><tr>
@@ -770,7 +780,7 @@ async function invoices() {
       <th>${t('invoices.col.amount')}</th><th>${t('invoices.col.tx')}</th><th></th></tr></thead>
     <tbody>${data.items.map(i=>`<tr>
       <td class="mono">${i.invoice_no}</td><td>${i.site_code}</td>
-      <td>${i.is_sandbox ? `<span class="pg-badge" style="background:#fef3c7;color:#92400e">${t('invoices.badge.sandbox')}</span>` : t('invoices.badge.live')}</td>
+      <td>${kindBadge(i)}</td>
       <td>${i.status}</td>
       <td class="mono">${i.amount} ${i.currency}</td><td class="mono">${i.source_transaction_id}</td>
       <td><a href="/admin/api/invoices/${i.id}/pdf" target="_blank">${t('invoices.pdf')}</a>
@@ -778,8 +788,8 @@ async function invoices() {
     </tr>`).join('') || `<tr><td colspan="7">${t('invoices.empty')}</td></tr>`}</tbody></table></div></div>`;
 }
 
-function setInvoiceSandboxFilter(id) {
-  invoiceSandboxFilter = id;
+function setInvoiceKindFilter(id) {
+  invoiceKindFilter = id;
   invoices();
 }
 

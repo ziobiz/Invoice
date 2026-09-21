@@ -268,34 +268,46 @@ adminRouter.get('/invoices', async (req, res, next) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Number(req.query.offset) || 0;
     const site = req.query.site ? String(req.query.site) : null;
-    const sandboxRaw = String(req.query.sandbox || 'all').toLowerCase();
-    const sandbox =
-      sandboxRaw === 'yes' || sandboxRaw === 'true' || sandboxRaw === '1'
-        ? 'yes'
-        : sandboxRaw === 'no' || sandboxRaw === 'false' || sandboxRaw === '0'
-          ? 'no'
-          : 'all';
+    const kindRaw = String(req.query.kind || req.query.sandbox || 'live').toLowerCase();
+    const kind =
+      kindRaw === 'simulator' || kindRaw === 'sim'
+        ? 'simulator'
+        : kindRaw === 'sandbox' || kindRaw === 'yes' || kindRaw === 'true' || kindRaw === '1'
+          ? 'sandbox'
+          : kindRaw === 'all'
+            ? 'all'
+            : 'live';
     const rows = await query(
       `SELECT i.*, s.code AS site_code,
-              (i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%') AS is_sandbox
+              CASE
+                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%' THEN 'simulator'
+                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%' THEN 'sandbox'
+                ELSE 'live'
+              END AS invoice_kind
        FROM invoices i
        JOIN sites s ON s.id = i.site_id
        WHERE ($1::text IS NULL OR s.code = $1)
          AND (
            $2::text = 'all'
-           OR ($2::text = 'yes' AND i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%')
-           OR ($2::text = 'no' AND (i.memo IS NULL OR i.memo NOT LIKE '[SANDBOX]%'))
+           OR ($2::text = 'simulator' AND i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%')
+           OR ($2::text = 'sandbox' AND i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%')
+           OR (
+             $2::text = 'live'
+             AND (i.memo IS NULL OR (i.memo NOT LIKE '[SIMULATOR]%' AND i.memo NOT LIKE '[SANDBOX]%'))
+           )
          )
        ORDER BY i.issued_at DESC
        LIMIT $3 OFFSET $4`,
-      [site, sandbox, limit, offset],
+      [site, kind, limit, offset],
     );
     res.json({
       items: rows.rows.map((r) => ({
         ...r,
-        is_sandbox: Boolean(r.is_sandbox),
+        invoice_kind: r.invoice_kind,
+        is_sandbox: r.invoice_kind === 'sandbox',
+        is_simulator: r.invoice_kind === 'simulator',
       })),
-      sandbox,
+      kind,
     });
   } catch (e) {
     next(e);

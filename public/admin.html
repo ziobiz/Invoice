@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice Service</title>
   <!-- BRAND_META -->
-  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260921updNav1" />
+  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260923simWm1" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-  <script src="/admin/manuals.js?v=20260921updNav1"></script>
+  <script src="/admin/manuals.js?v=20260923simWm1"></script>
 </head>
 <body>
   <!-- LOGIN -->
@@ -98,7 +98,7 @@
   </div>
 
 <script>
-let I18N = {}, LANG = localStorage.getItem('invoice_lang') || (navigator.language||'en').slice(0,2);
+let I18N = {}, I18N_EN = {}, LANG = localStorage.getItem('invoice_lang') || (navigator.language||'en').slice(0,2);
 if (!['ko','en','ja','th','zh'].includes(LANG)) LANG = 'en';
 let publicCfg = { turnstileEnabled: false, turnstileSiteKey: '', turnstileDisplayMode: 'text' };
 let turnstileWidgetId = null;
@@ -148,6 +148,7 @@ const ICO = {
 const NAV = [
   { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
   { id:'invoices', key:'nav.invoices', icon:'invoices' },
+  { id:'merged', key:'nav.merged', icon:'invoices' },
   { id:'sites', key:'nav.sites', icon:'sites' },
   { id:'parties', key:'nav.parties', icon:'parties' },
   { id:'products', key:'nav.products', icon:'products' },
@@ -164,7 +165,7 @@ const NAV_TREE = [
   { id:'dashboard', key:'nav.dashboard', icon:'dashboard' },
   {
     id:'grp-ops', key:'nav.group.ops', icon:'group',
-    children: ['invoices','sites','parties','products','mappings'],
+    children: ['invoices','merged','sites','parties','products','mappings'],
   },
   {
     id:'grp-system', key:'nav.group.system', icon:'platform',
@@ -174,9 +175,13 @@ const NAV_TREE = [
 ];
 
 function t(key, vars) {
-  let text = I18N[key] || key;
+  let text = I18N[key] || I18N_EN[key] || key;
   if (vars) Object.entries(vars).forEach(([k,v]) => { text = text.replaceAll('{'+k+'}', String(v)); });
   return text;
+}
+/** Invoice PDF system phrases stay English even when the admin UI language changes. */
+function pdfEn(key) {
+  return I18N_EN[key] || I18N[key] || key;
 }
 function intlLocale(lang) {
   return ({ ko:'ko-KR', en:'en-US', ja:'ja-JP', zh:'zh-CN', th:'th-TH' })[lang] || 'en-US';
@@ -219,12 +224,23 @@ function applyI18n() {
   applyBranding();
 }
 async function loadI18n(lang) {
-  I18N = await (await fetch('/locales/'+lang+'.json?v=20260921updNav1')).json();
+  const ver = '20260923pdfEn1';
+  const [ui, en] = await Promise.all([
+    fetch('/locales/'+lang+'.json?v='+ver).then((r) => r.json()),
+    Object.keys(I18N_EN).length
+      ? Promise.resolve(I18N_EN)
+      : fetch('/locales/en.json?v='+ver).then((r) => r.json()),
+  ]);
+  I18N = ui;
+  I18N_EN = en;
   LANG = lang; localStorage.setItem('invoice_lang', lang); applyI18n();
 }
 async function setLang(lang) {
   await loadI18n(lang);
-  if (!document.getElementById('appView').classList.contains('hidden')) renderShell();
+  if (document.getElementById('appView').classList.contains('hidden')) return;
+  renderShell();
+  // Re-render the open page body so labels match the new UI language
+  if (activeTab) await showTab(activeTab);
 }
 function setTheme(id) {
   shellTheme = id;
@@ -732,7 +748,7 @@ async function showTab(id) {
   activeTab = id;
   if (!openTabs.includes(id)) openTabs.push(id);
   renderShell();
-  const loaders = { dashboard, invoices, sites, parties, products, mappings, users, platform, audit, manuals, updates };
+  const loaders = { dashboard, invoices, merged, sites, parties, products, mappings, users, platform, audit, manuals, updates };
   await loaders[id]?.();
 }
 
@@ -849,11 +865,104 @@ async function dashboard() {
 
 let invoiceKindFilter = 'all';
 let invoiceSiteFilter = '';
-let invoiceFrom = '';
-let invoiceTo = '';
 let invoiceQField = '';
 let invoiceQ = '';
 let invoicePdfLang = 'en';
+
+/** Local YYYY-MM-DD for <input type="date"> (browser calendar stays OS locale). */
+function fmtDateInput(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, '0');
+  const day = String(x.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+/** Default range: start = 7 days ago, end = today. */
+function defaultDateRange(daysBack = 7) {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - daysBack);
+  return { from: fmtDateInput(from), to: fmtDateInput(to) };
+}
+const _invRange0 = defaultDateRange(7);
+let invoiceFrom = _invRange0.from;
+let invoiceTo = _invRange0.to;
+
+/** Crypto USDT-style page sizes (50…1000 / all) for Invoice Ops menus */
+const PAGER_SIZES = [50, 100, 300, 400, 500, 1000];
+const pagerState = {
+  invoices: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+  sites: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+  parties: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+  products: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+  mappings: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+  merged: { page: 1, pageSize: /** @type {number|'all'} */ (50) },
+};
+
+function pagerSlice(key, items) {
+  const st = pagerState[key] || { page: 1, pageSize: 50 };
+  const list = items || [];
+  if (st.pageSize === 'all') return list;
+  const size = Number(st.pageSize) || 50;
+  const pages = Math.max(1, Math.ceil(list.length / size) || 1);
+  if (st.page > pages) st.page = pages;
+  const start = (st.page - 1) * size;
+  return list.slice(start, start + size);
+}
+
+function renderPageSizeBar(key, total) {
+  const st = pagerState[key] || { page: 1, pageSize: 50 };
+  const n = Number(total) || 0;
+  const numeric = st.pageSize === 'all' ? Math.max(n, 1) : Number(st.pageSize) || 50;
+  const pages = st.pageSize === 'all' ? 1 : Math.max(1, Math.ceil(n / numeric) || 1);
+  if (st.page > pages) st.page = pages;
+  const safePage = Math.min(Math.max(1, st.page), pages);
+  const maxButtons = 20;
+  const windowStart = Math.max(
+    1,
+    Math.min(safePage - Math.floor(maxButtons / 2), Math.max(1, pages - maxButtons + 1)),
+  );
+  const windowEnd = Math.min(pages, windowStart + maxButtons - 1);
+  const sizeBtns = PAGER_SIZES.map((s) => {
+    const label = s === 1000 ? t('pager.size1000') : String(s);
+    return `<button type="button" class="pg-pager-btn ${st.pageSize === s ? 'on' : ''}" onclick="setPagerSize('${key}',${s})">${label}</button>`;
+  }).join('');
+  const allBtn = `<button type="button" class="pg-pager-btn ${st.pageSize === 'all' ? 'on' : ''}" onclick="setPagerSize('${key}','all')">${t('pager.all')}</button>`;
+  let pageBtns = '';
+  if (windowStart > 1) {
+    pageBtns += `<button type="button" class="pg-pager-page" onclick="setPagerPage('${key}',${Math.max(1, windowStart - 1)})" aria-label="${escHtml(t('pager.prev'))}">‹</button>`;
+  }
+  for (let p = windowStart; p <= windowEnd; p++) {
+    pageBtns += `<button type="button" class="pg-pager-page ${safePage === p ? 'on' : ''}" onclick="setPagerPage('${key}',${p})">${p}</button>`;
+  }
+  if (windowEnd < pages) {
+    pageBtns += `<button type="button" class="pg-pager-page" onclick="setPagerPage('${key}',${Math.min(pages, windowEnd + 1)})" aria-label="${escHtml(t('pager.next'))}">›</button>`;
+  }
+  return `<div class="pg-pager" data-pager="${key}">
+    <div class="pg-pager-sizes">
+      <span class="pg-pager-label">${t('pager.viewAtOnce')}</span>
+      ${sizeBtns}${allBtn}
+      <span class="pg-pager-meta">${t('pager.unit')} (${t('pager.total', { n: String(n) })})</span>
+    </div>
+    <div class="pg-pager-pages">${pageBtns}</div>
+    <div class="pg-pager-spacer" aria-hidden="true"></div>
+  </div>`;
+}
+
+function setPagerSize(key, size) {
+  if (!pagerState[key]) return;
+  pagerState[key].pageSize = size === 'all' ? 'all' : Number(size);
+  pagerState[key].page = 1;
+  const loaders = { invoices, sites, parties, products, mappings, merged };
+  loaders[key]?.();
+}
+
+function setPagerPage(key, page) {
+  if (!pagerState[key]) return;
+  pagerState[key].page = Math.max(1, Number(page) || 1);
+  const loaders = { invoices, sites, parties, products, mappings, merged };
+  loaders[key]?.();
+}
 
 function escHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -991,8 +1100,13 @@ async function updates() {
 }
 
 async function invoices() {
+  const st = pagerState.invoices;
+  const pageSize = st.pageSize;
+  const limit = pageSize === 'all' ? 20000 : Number(pageSize) || 50;
+  const offset = pageSize === 'all' ? 0 : (Math.max(1, st.page) - 1) * limit;
   const qParams = new URLSearchParams({
-    limit: '100',
+    limit: String(limit),
+    offset: String(offset),
     kind: invoiceKindFilter,
     site: invoiceSiteFilter,
     from: invoiceFrom,
@@ -1006,6 +1120,14 @@ async function invoices() {
     api(`/admin/api/invoices?${qParams.toString()}`),
     api('/admin/api/sites'),
   ]);
+  const total = Number(data.total ?? (data.items || []).length) || 0;
+  if (pageSize !== 'all') {
+    const pages = Math.max(1, Math.ceil(total / limit) || 1);
+    if (st.page > pages) {
+      st.page = pages;
+      return invoices();
+    }
+  }
   const kindBadge = (row) => {
     const kind = invoiceKindOf(row);
     return `<span class="inv-kind inv-kind-${kind}">${t('invoices.badge.'+kind)}</span>`;
@@ -1145,6 +1267,7 @@ async function invoices() {
       <td class="inv-col-manage">${deleted ? '—' : manageMenu(i.id, i.status)}</td>
     </tr>`;
     }).join('') || `<tr><td colspan="14">${t('invoices.empty')}</td></tr>`}</tbody></table>
+    ${renderPageSizeBar('invoices', total)}
   </div></div>`;
 }
 
@@ -1162,7 +1285,8 @@ function eventInfo(row) {
   if (regen && regen > issued + 1000) {
     return { at: row.pdf_regenerated_at, kind: 'regen' };
   }
-  return null;
+  // API/webhook issue (and any fresh issue): show "신규" with occurrence time (= issued_at / occurredAt)
+  return { at: row.issued_at, kind: 'new' };
 }
 
 function fmtEventAt(row) {
@@ -1175,6 +1299,7 @@ function fmtEventKind(row) {
   if (!info) return '—';
   if (info.kind === 'delete') return `<span class="touch-delete">${t('invoices.event.delete')}</span>`;
   if (info.kind === 'regen') return `<span class="touch-regen">${t('invoices.event.regen')}</span>`;
+  if (info.kind === 'new') return `<span class="touch-new">${t('invoices.event.new')}</span>`;
   return `<span class="touch-edit">${t('invoices.event.edit')}</span>`;
 }
 
@@ -1213,6 +1338,16 @@ async function onInvoiceRowDbl(ev, id) {
   const st = tr?.dataset?.status || '';
   if (tr && (tr.classList.contains('inv-row-deleted') || st === 'reissued' || st === 'void')) return;
   editInvoice(id);
+}
+
+/** Row double-click → same as Edit button (skip clicks on controls). */
+function onRowDblEdit(ev, fnName, ...args) {
+  if (ev.target.closest('button, a, input, select, textarea, label, .inv-col-manage, .sites-keys-cell, .inv-actions')) return;
+  const tr = ev.currentTarget;
+  if (tr && tr.classList.contains('inv-row-deleted')) return;
+  const fn = typeof window[fnName] === 'function' ? window[fnName] : null;
+  if (!fn) return;
+  fn(...args);
 }
 
 function closeInvoiceEdit() {
@@ -1356,6 +1491,7 @@ function applyInvoiceSearch() {
   invoiceFrom = document.getElementById('invFrom')?.value || '';
   invoiceTo = document.getElementById('invTo')?.value || '';
   invoicePdfLang = document.getElementById('invPdfLang')?.value || 'en';
+  pagerState.invoices.page = 1;
   invoices();
 }
 
@@ -1373,6 +1509,8 @@ function siteRemarksLabel(s) {
 
 async function sites() {
   const data = await api('/admin/api/sites');
+  const allItems = data.items || [];
+  const pageItems = pagerSlice('sites', allItems);
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('sites.title')}</div><div class="pg-card-body">
     <p class="pg-card-hint">${t('sites.sealsPageHint')}</p>
     <input type="hidden" id="siteEditId" value=""/>
@@ -1383,7 +1521,14 @@ async function sites() {
       <div><label class="pg-label">${t('sites.active')}</label>
         <select class="pg-select" id="siteActive"><option value="true">${t('sites.activeYes')}</option><option value="false">${t('sites.activeNo')}</option></select>
       </div>
+      <div><label class="pg-label">${t('sites.useSharedParties')}</label>
+        <select class="pg-select" id="siteUseSharedParties">
+          <option value="false">${t('sites.useSharedPartiesNo')}</option>
+          <option value="true">${t('sites.useSharedPartiesYes')}</option>
+        </select>
+      </div>
     </div>
+    <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.useSharedPartiesHint')}</p>
     <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem">
       <button class="pg-btn pg-btn-primary" id="siteSaveBtn" type="button" onclick="saveSite()">${t('sites.add')}</button>
       <button class="pg-btn hidden" id="siteCancelBtn" type="button" onclick="cancelSiteEdit()">${t('sites.cancelEdit')}</button>
@@ -1392,6 +1537,7 @@ async function sites() {
       <th>${t('sites.code')}</th>
       <th>${t('sites.name')}</th>
       <th>${t('sites.active')}</th>
+      <th>${t('sites.useSharedParties')}</th>
       <th>${t('sites.colRemarks')}</th>
       <th>${t('sites.colNotice')}</th>
       <th>${t('sites.keys')}</th>
@@ -1401,10 +1547,11 @@ async function sites() {
       <th>${t('sites.seals')}</th>
       <th>${t('sites.actions')}</th>
     </tr></thead>
-    <tbody>${data.items.map(s=>`<tr>
+    <tbody>${pageItems.map(s=>`<tr class="pg-row-edit" ondblclick="onRowDblEdit(event,'editSite','${s.id}')">
       <td class="mono">${escHtml(s.code)}</td>
       <td>${escHtml(s.name)}</td>
       <td>${s.active ? t('sites.activeYes') : t('sites.activeNo')}</td>
+      <td>${s.use_shared_parties ? t('sites.useSharedPartiesYes') : t('sites.useSharedPartiesNo')}</td>
       <td>${escHtml(siteRemarksLabel(s))}</td>
       <td>${escHtml(siteNoticeLabel(s))}</td>
       <td class="sites-keys-cell">
@@ -1415,11 +1562,12 @@ async function sites() {
       <td class="seal-status">${s.seal_stamp_path ? t('sites.assetOn') : t('sites.assetOff')}</td>
       <td class="seal-status">${s.seal_signature_path ? t('sites.assetOn') : t('sites.assetOff')}</td>
       <td><button class="pg-btn pg-btn-primary" style="margin:0" onclick="openSiteSeals('${s.id}')">${t('sites.configureSeals')}</button></td>
-      <td style="white-space:nowrap">
+      <td class="inv-col-manage" style="white-space:nowrap">
         <button class="pg-btn" style="margin:0" onclick="editSite('${s.id}')">${t('sites.edit')}</button>
         <button class="pg-btn pg-btn-danger" style="margin:0" onclick="deleteSite('${s.id}','${escHtml(s.code)}')">${t('sites.delete')}</button>
       </td>
     </tr>`).join('')}</tbody></table>
+    ${renderPageSizeBar('sites', allItems.length)}
     <div id="keysBox"></div>
     <div id="sealsBox" class="site-seals-box"></div>
   </div></div>`;
@@ -1494,6 +1642,14 @@ function syncNoticeSlotUi() {
   document.querySelectorAll('.line-slot-fields').forEach((el) => {
     el.classList.toggle('hidden', el.getAttribute('data-slot') !== lineSlot || lineSlot === 'off');
   });
+}
+
+/** When turning watermark ON, default SAMPLE on. Turning watermark OFF does not force SAMPLE off (independent). */
+function syncSimulatorSampleSealFromWm() {
+  const wm = document.getElementById('pdfSimulatorWmEnabled');
+  const sample = document.getElementById('pdfSimulatorSampleSealEnabled');
+  if (!wm || !sample) return;
+  if (wm.value === 'true') sample.value = 'true';
 }
 
 async function openSiteSeals(siteId) {
@@ -1686,10 +1842,16 @@ async function openSiteSeals(siteId) {
             <input class="pg-input" type="number" min="0" max="365" id="pdfPaymentDateOffset"
               value="${Number(s.pdf_payment_date_offset ?? 3)}"/></div>
         </div>
+        <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfTermsOfPayment')}</label>
+          <input class="pg-input" id="pdfTermsOfPayment"
+            value="${escHtml(s.pdf_terms_of_payment || pdfEn('pdf.defaultPaymentTerms'))}"
+            placeholder="${escHtml(pdfEn('pdf.defaultPaymentTerms'))}"/></div>
+        <p class="pg-card-hint" style="margin-top:.25rem">${t('sites.pdfTermsOfPaymentHint')}</p>
         <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfPaymentTerms')}</label>
-          <textarea class="pg-input" id="pdfPaymentTerms" rows="2">${escHtml(s.pdf_payment_terms || t('pdf.paymentTermsBody'))}</textarea></div>
+          <textarea class="pg-input" id="pdfPaymentTerms" rows="2">${escHtml(s.pdf_payment_terms || pdfEn('pdf.paymentTermsBody'))}</textarea></div>
         <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfPaymentDue')}</label>
-          <input class="pg-input" id="pdfPaymentDue" value="${escHtml(s.pdf_payment_due || t('pdf.paymentDue'))}"/></div>
+          <input class="pg-input" id="pdfPaymentDue" value="${escHtml(s.pdf_payment_due || pdfEn('pdf.paymentDue'))}"/></div>
+        <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.pdfInvoiceLangHint')}</p>
 
         <div id="remarksFieldsBox" class="${s.pdf_remarks_enabled === false ? 'hidden' : ''}">
           <div class="pg-label" style="margin-top:1rem">${t('sites.pdfRemarks')}</div>
@@ -1725,6 +1887,38 @@ async function openSiteSeals(siteId) {
         ${lineFields(...linePackArgs('a'))}
         ${lineFields(...linePackArgs('b'))}
         ${lineFields(...linePackArgs('c'))}
+
+        <div class="pg-label" style="margin-top:1.25rem">${t('sites.pdfSimulator')}</div>
+        <p class="pg-card-hint">${t('sites.pdfSimulatorHint')}</p>
+        <div class="pg-row" style="margin-top:.35rem">
+          <div><label class="pg-label">${t('sites.pdfSimulatorWatermark')}</label>
+            <select class="pg-select" id="pdfSimulatorWmEnabled" onchange="syncSimulatorSampleSealFromWm()">
+              <option value="true" ${s.pdf_simulator_watermark_enabled !== false ? 'selected' : ''}>${t('sites.simulatorWmOn')}</option>
+              <option value="false" ${s.pdf_simulator_watermark_enabled === false ? 'selected' : ''}>${t('sites.simulatorWmOff')}</option>
+            </select>
+          </div>
+          <div><label class="pg-label">${t('sites.pdfSimulatorSampleSeal')}</label>
+            <select class="pg-select" id="pdfSimulatorSampleSealEnabled">
+              <option value="true" ${s.pdf_simulator_sample_seal_enabled !== false ? 'selected' : ''}>${t('sites.simulatorWmOn')}</option>
+              <option value="false" ${s.pdf_simulator_sample_seal_enabled === false ? 'selected' : ''}>${t('sites.simulatorWmOff')}</option>
+            </select>
+          </div>
+        </div>
+        <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.pdfSimulatorSampleSealHint')}</p>
+        <div style="margin-top:.5rem"><label class="pg-label">${t('sites.pdfSimulatorWatermarkText')}</label>
+          <textarea class="pg-input" id="pdfSimulatorWmText" rows="2"
+            placeholder="${escHtml(pdfEn('pdf.simulatorWatermark'))}">${escHtml(s.pdf_simulator_watermark_text || '')}</textarea></div>
+        <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.pdfSimulatorWatermarkTextHint')}</p>
+
+        <div class="pg-label" style="margin-top:1.25rem">${t('sites.invoiceRetention')}</div>
+        <p class="pg-card-hint">${t('sites.invoiceRetentionHint')}</p>
+        <div class="pg-row" style="margin-top:.35rem">
+          <div><label class="pg-label">${t('sites.invoiceRetentionDays')}</label>
+            <input class="pg-input" type="number" min="0" max="30" id="invoiceRetentionDays"
+              value="${s.invoice_retention_days != null ? Number(s.invoice_retention_days) : ''}"
+              placeholder="0"/></div>
+        </div>
+        <p class="pg-card-hint" style="margin-top:.35rem">${t('sites.invoiceRetentionDaysHint')}</p>
       </div>
 
       <button class="pg-btn pg-btn-primary" type="button" style="margin-top:1rem" onclick="saveSiteSealSettings('${siteId}')">${t('sites.saveSeal')}</button>
@@ -1825,11 +2019,22 @@ async function saveSiteSealSettings(siteId) {
       signatory_title: document.getElementById('signatoryTitle')?.value || 'CEO',
       ...flags,
       pdf_payment_date_offset: Number(document.getElementById('pdfPaymentDateOffset')?.value ?? 3),
+      pdf_terms_of_payment: document.getElementById('pdfTermsOfPayment')?.value || '',
       pdf_payment_terms: document.getElementById('pdfPaymentTerms')?.value || '',
       pdf_payment_due: document.getElementById('pdfPaymentDue')?.value || '',
       pdf_remarks_notice: document.getElementById('pdfRemarksNotice')?.value || '',
       pdf_remarks_enabled: document.getElementById('pdfRemarksEnabled')?.value !== 'false',
       pdf_notice_slot: slot,
+      pdf_simulator_watermark_enabled: document.getElementById('pdfSimulatorWmEnabled')?.value !== 'false',
+      pdf_simulator_watermark_text: document.getElementById('pdfSimulatorWmText')?.value || '',
+      pdf_simulator_sample_seal_enabled: document.getElementById('pdfSimulatorSampleSealEnabled')?.value !== 'false',
+      invoice_retention_days: (() => {
+        const raw = document.getElementById('invoiceRetentionDays')?.value;
+        if (raw === undefined || raw === null || String(raw).trim() === '' || Number(raw) <= 0) return null;
+        const n = Math.floor(Number(raw));
+        if (!Number.isFinite(n)) return null;
+        return Math.max(1, Math.min(30, n));
+      })(),
       ...pack('a'),
       ...pack('b'),
       ...pack('c'),
@@ -1860,65 +2065,105 @@ async function parties() {
   const siteOpts = sites.map((s) => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.code)})</option>`).join('');
   const isBuyer = (p) => p.kind === 'buyer' || p.kind === 'both';
   const isSeller = (p) => p.kind === 'seller' || p.kind === 'both';
-  const list = partyTab === 'buyer' ? all.filter(isBuyer) : all.filter(isSeller);
+  const list =
+    partyTab === 'shared'
+      ? all.filter((p) => p.is_shared)
+      : partyTab === 'buyer'
+        ? all.filter((p) => isBuyer(p) || p.is_shared)
+        : all.filter((p) => isSeller(p) || p.is_shared);
+  const pageList = pagerSlice('parties', list);
   const tab = (id, label) =>
     `<button type="button" class="inv-tab ${partyTab===id?'on':''}" onclick="setPartyTab('${id}')">${label}</button>`;
-  const formPrefix = partyTab === 'buyer' ? 'pb' : 'ps';
-  const formKind = partyTab;
+  const formPrefix = partyTab === 'seller' || partyTab === 'shared' ? 'ps' : 'pb';
   const codePh = partyTab === 'buyer' ? 'OTL-JP' : 'OTL-KR';
   const countryPh = partyTab === 'buyer' ? 'JP' : 'KR';
   const editing = editingPartyId ? all.find((p) => p.id === editingPartyId) : null;
   const copying = copyingPartyId ? all.find((p) => p.id === copyingPartyId) : null;
   const formSource = editing || copying;
+  const formKind =
+    partyTab === 'shared'
+      ? String(formSource?.kind || 'both')
+      : partyTab;
   const formTitle = editing
     ? t('parties.editTitle')
     : copying
       ? t('parties.copyTitle')
       : partyTab === 'buyer'
         ? t('parties.addBuyer')
-        : t('parties.addSeller');
+        : partyTab === 'shared'
+          ? t('parties.addShared')
+          : t('parties.addSeller');
   const saveLabel = editing
     ? t('parties.saveEdit')
     : copying
       ? t('parties.saveCopy')
       : partyTab === 'buyer'
         ? t('parties.addBuyer')
-        : t('parties.addSeller');
+        : partyTab === 'shared'
+          ? t('parties.addShared')
+          : t('parties.addSeller');
   const codeLocked = !!editing;
   const showCancel = !!(editing || copying);
-  const bankRow =
-    partyTab === 'seller'
-      ? `<div style="margin-top:.75rem">
+  const showBank = partyTab === 'seller' || partyTab === 'shared';
+  const bankFieldsHtml = (prefix) => `<div style="margin-top:.5rem">
           <label class="pg-label">${t('parties.bankInfo')}</label>
           <p class="pg-card-hint" style="margin:.25rem 0 .5rem">${t('parties.bankInfoHint')}</p>
           <div class="pg-row">
             <div><label class="pg-label">${t('parties.bank.accountNo')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_accountNo" placeholder="${escHtml(t('parties.bank.accountNoPh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_accountNo" placeholder="${escHtml(t('parties.bank.accountNoPh'))}" autocomplete="off"/></div>
             <div><label class="pg-label">${t('parties.bank.accountName')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_accountName" placeholder="${escHtml(t('parties.bank.accountNamePh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_accountName" placeholder="${escHtml(t('parties.bank.accountNamePh'))}" autocomplete="off"/></div>
             <div><label class="pg-label">${t('parties.bank.bankName')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_bankName" placeholder="${escHtml(t('parties.bank.bankNamePh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_bankName" placeholder="${escHtml(t('parties.bank.bankNamePh'))}" autocomplete="off"/></div>
           </div>
           <div class="pg-row">
             <div style="flex:2"><label class="pg-label">${t('parties.bank.bankAddress')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_bankAddress" placeholder="${escHtml(t('parties.bank.bankAddressPh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_bankAddress" placeholder="${escHtml(t('parties.bank.bankAddressPh'))}" autocomplete="off"/></div>
             <div><label class="pg-label">${t('parties.bank.branchName')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_branchName" placeholder="${escHtml(t('parties.bank.branchNamePh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_branchName" placeholder="${escHtml(t('parties.bank.branchNamePh'))}" autocomplete="off"/></div>
           </div>
           <div class="pg-row">
             <div><label class="pg-label">${t('parties.bank.swiftCode')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_swiftCode" placeholder="${escHtml(t('parties.bank.swiftCodePh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_swiftCode" placeholder="${escHtml(t('parties.bank.swiftCodePh'))}" autocomplete="off"/></div>
             <div><label class="pg-label">${t('parties.bank.fax')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_fax" placeholder="${escHtml(t('parties.bank.faxPh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_fax" placeholder="${escHtml(t('parties.bank.faxPh'))}" autocomplete="off"/></div>
             <div><label class="pg-label">${t('parties.bank.website')}</label>
-              <input class="pg-input" id="${formPrefix}Bank_website" placeholder="${escHtml(t('parties.bank.websitePh'))}" autocomplete="off"/></div>
+              <input class="pg-input" id="${prefix}Bank_website" placeholder="${escHtml(t('parties.bank.websitePh'))}" autocomplete="off"/></div>
           </div>
+        </div>`;
+  const bankRow = showBank ? bankFieldsHtml(formPrefix) : '';
+  const buyerSharedExtraOpen = partyTab === 'buyer' && !!(formSource?.is_shared);
+  const buyerSharedExtraCard =
+    partyTab === 'buyer'
+      ? `<div id="buyerSellerExtraCard" class="party-form-card ${buyerSharedExtraOpen ? '' : 'hidden'}" style="margin-top:.75rem">
+          <h3>${t('parties.sharedSellerCardTitle')}</h3>
+          <p class="pg-card-hint">${t('parties.sharedSellerCardHint')}</p>
+          ${bankFieldsHtml('pb')}
         </div>`
+      : '';
+  const sharedKindRow =
+    partyTab === 'shared'
+      ? `<div class="pg-row" style="margin-top:.35rem">
+          <div><label class="pg-label">${t('parties.kind')}</label>
+            <select class="pg-select" id="${formPrefix}Kind">
+              <option value="both">${t('parties.kind.both')}</option>
+              <option value="seller">${t('parties.kind.seller')}</option>
+              <option value="buyer">${t('parties.kind.buyer')}</option>
+            </select>
+          </div>
+          <div><label class="pg-label">${t('parties.isShared')}</label>
+            <select class="pg-select" id="${formPrefix}IsShared" disabled>
+              <option value="true" selected>${t('parties.isSharedYes')}</option>
+            </select>
+          </div>
+        </div>
+        <p class="pg-card-hint" style="margin:.25rem 0 .5rem">${t('parties.sharedTabHint')}</p>`
       : '';
   content.innerHTML = `<div class="pg-card"><div class="pg-card-head">${t('parties.title')}</div><div class="pg-card-body">
     <div class="inv-tabs" style="margin-bottom:.75rem">
       ${tab('buyer', t('parties.tab.buyer'))}
       ${tab('seller', t('parties.tab.seller'))}
+      ${tab('shared', t('parties.tab.shared'))}
     </div>
     <p class="pg-card-hint">${t('parties.hint')}</p>
     <div class="party-form-card" style="margin-top:.75rem">
@@ -1934,6 +2179,7 @@ async function parties() {
         </div>
         <div><label class="pg-label">${t('parties.legalName')}</label><input class="pg-input" id="${formPrefix}Legal"/></div>
       </div>
+      ${sharedKindRow}
       <div class="pg-row">
         <div><label class="pg-label">${partyTab === 'buyer' ? t('parties.contactName') : t('parties.signatoryName')}</label>
           <input class="pg-input" id="${formPrefix}SignName" placeholder="${escHtml(partyTab === 'buyer' ? t('parties.contactNamePh') : t('parties.signatoryNamePh'))}"/></div>
@@ -1950,8 +2196,20 @@ async function parties() {
         <div><label class="pg-label">${t('parties.country')}</label><input class="pg-input" id="${formPrefix}Country" placeholder="${countryPh}"/></div>
         <div><label class="pg-label">${t('parties.email')}</label><input class="pg-input" id="${formPrefix}Email"/></div>
         <div><label class="pg-label">${t('parties.taxId')}</label><input class="pg-input" id="${formPrefix}Tax"/></div>
+        ${
+          partyTab === 'shared'
+            ? ''
+            : `<div><label class="pg-label">${t('parties.isShared')}</label>
+          <select class="pg-select" id="${formPrefix}IsShared" onchange="onPartySharedChange()">
+            <option value="false">${t('parties.isSharedNo')}</option>
+            <option value="true">${t('parties.isSharedYes')}</option>
+          </select>
+        </div>`
+        }
       </div>
+      <p class="pg-card-hint" style="margin:.25rem 0 .5rem">${t('parties.isSharedHint')}</p>
       ${bankRow}
+      ${buyerSharedExtraCard}
       <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
         <button class="pg-btn pg-btn-primary" type="button" id="partySaveBtn" onclick="savePartyKind('${formKind}')">${saveLabel}</button>
         <button class="pg-btn ${showCancel ? '' : 'hidden'}" type="button" id="partyCancelBtn" onclick="cancelPartyEdit()">${t('parties.cancelEdit')}</button>
@@ -1961,24 +2219,29 @@ async function parties() {
       <th>${t('parties.site')}</th>
       <th>${t('parties.code')}</th>
       <th>${t('parties.legalName')}</th>
+      ${partyTab === 'shared' ? `<th>${t('parties.kind')}</th>` : ''}
       <th>${t('parties.country')}</th>
       <th>${t('parties.phone')}</th>
       <th>${t('parties.website')}</th>
+      <th>${t('parties.sharedStatus')}</th>
       <th class="inv-col-manage">${t('col.manage')}</th>
     </tr></thead>
-    <tbody>${list.map((p) => `<tr>
+    <tbody>${pageList.map((p) => `<tr class="pg-row-edit" ondblclick="onRowDblEdit(event,'editParty','${p.id}')">
       <td class="mono">${escHtml(p.site_code||'—')}</td>
       <td class="mono">${escHtml(p.code)}</td>
       <td>${escHtml(p.legal_name)}</td>
+      ${partyTab === 'shared' ? `<td>${t('parties.kind.' + (p.kind === 'buyer' || p.kind === 'seller' ? p.kind : 'both'))}</td>` : ''}
       <td>${escHtml(p.country||'')}</td>
       <td>${escHtml(p.phone||'')}</td>
       <td>${escHtml(p.website||'')}</td>
-      <td style="white-space:nowrap">
+      <td>${p.is_shared ? t('parties.sharedOn') : t('parties.sharedOff')}</td>
+      <td class="inv-col-manage" style="white-space:nowrap">
         <button class="pg-btn" style="margin:0" type="button" onclick="editParty('${p.id}')">${t('parties.edit')}</button>
         <button class="pg-btn" style="margin:0" type="button" onclick="copyParty('${p.id}')">${t('parties.copy')}</button>
         <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteParty('${p.id}','${escHtml(p.code)}')">${t('parties.delete')}</button>
       </td>
-    </tr>`).join('') || `<tr><td colspan="7">${t('parties.empty')}</td></tr>`}</tbody></table>
+    </tr>`).join('') || `<tr><td colspan="${partyTab === 'shared' ? 9 : 8}">${t('parties.empty')}</td></tr>`}</tbody></table>
+    ${renderPageSizeBar('parties', list.length)}
   </div></div>`;
   if (formSource) {
     fillPartyForm(formSource);
@@ -1990,16 +2253,27 @@ async function parties() {
       }
     }
   }
+  onPartySharedChange();
+}
+
+function onPartySharedChange() {
+  const card = document.getElementById('buyerSellerExtraCard');
+  const sel = document.getElementById('pbIsShared');
+  if (!card) return;
+  const on = sel?.value === 'true';
+  card.classList.toggle('hidden', !on);
 }
 
 function setPartyTab(id) {
-  partyTab = id === 'seller' ? 'seller' : 'buyer';
+  partyTab = id === 'seller' ? 'seller' : id === 'shared' ? 'shared' : 'buyer';
   editingPartyId = null;
   copyingPartyId = null;
+  pagerState.parties.page = 1;
   parties();
 }
 
 function partyFormPrefix(kind) {
+  if (kind === 'shared' || partyTab === 'shared') return 'ps';
   return kind === 'seller' ? 'ps' : 'pb';
 }
 
@@ -2043,10 +2317,19 @@ function fillPartyBankInfo(prefix, raw) {
 }
 
 function partyFormPayload(kind) {
-  const prefix = partyFormPrefix(kind);
+  const sharedTab = partyTab === 'shared';
+  const prefix = sharedTab ? 'ps' : partyFormPrefix(kind);
+  const isShared = sharedTab || document.getElementById(prefix + 'IsShared')?.value === 'true';
+  let resolvedKind = sharedTab
+    ? String(document.getElementById(prefix + 'Kind')?.value || kind || 'both')
+    : kind;
+  // Shared parties must work as both buyer and seller in mappings
+  if (isShared && (resolvedKind === 'buyer' || resolvedKind === 'seller')) {
+    resolvedKind = 'both';
+  }
   const payload = {
     site_id: document.getElementById(prefix + 'Site')?.value,
-    kind,
+    kind: resolvedKind,
     code: document.getElementById(prefix + 'Code')?.value,
     legal_name: document.getElementById(prefix + 'Legal')?.value,
     signatory_name: document.getElementById(prefix + 'SignName')?.value,
@@ -2057,32 +2340,40 @@ function partyFormPayload(kind) {
     country: document.getElementById(prefix + 'Country')?.value,
     email: document.getElementById(prefix + 'Email')?.value,
     tax_id: document.getElementById(prefix + 'Tax')?.value,
+    is_shared: !!isShared,
   };
-  if (kind === 'seller') {
+  if (resolvedKind === 'seller' || resolvedKind === 'both' || sharedTab || isShared) {
     payload.bank_info = collectPartyBankInfo(prefix);
   }
   return payload;
 }
 
 function fillPartyForm(p) {
-  const kind = p.kind === 'buyer' ? 'buyer' : 'seller';
-  const prefix = partyFormPrefix(kind);
+  const formPrefixNow = partyTab === 'shared' || partyTab === 'seller' ? 'ps' : 'pb';
   const set = (id, v) => {
     const el = document.getElementById(id);
     if (el) el.value = v ?? '';
   };
-  set(prefix + 'Site', p.site_id || '');
-  set(prefix + 'Code', p.code || '');
-  set(prefix + 'Legal', p.legal_name || '');
-  set(prefix + 'SignName', p.signatory_name || '');
-  set(prefix + 'SignTitle', p.signatory_title || '');
-  set(prefix + 'Address', p.address || '');
-  set(prefix + 'Phone', p.phone || '');
-  set(prefix + 'Web', p.website || '');
-  set(prefix + 'Country', p.country || '');
-  set(prefix + 'Email', p.email || '');
-  set(prefix + 'Tax', p.tax_id || '');
-  if (kind === 'seller') fillPartyBankInfo(prefix, p.bank_info);
+  set(formPrefixNow + 'Site', p.site_id || '');
+  set(formPrefixNow + 'Code', p.code || '');
+  set(formPrefixNow + 'Legal', p.legal_name || '');
+  set(formPrefixNow + 'SignName', p.signatory_name || '');
+  set(formPrefixNow + 'SignTitle', p.signatory_title || '');
+  set(formPrefixNow + 'Address', p.address || '');
+  set(formPrefixNow + 'Phone', p.phone || '');
+  set(formPrefixNow + 'Web', p.website || '');
+  set(formPrefixNow + 'Country', p.country || '');
+  set(formPrefixNow + 'Email', p.email || '');
+  set(formPrefixNow + 'Tax', p.tax_id || '');
+  if (partyTab === 'shared') {
+    set(formPrefixNow + 'Kind', p.kind || 'both');
+    fillPartyBankInfo(formPrefixNow, p.bank_info);
+  } else {
+    set(formPrefixNow + 'IsShared', p.is_shared ? 'true' : 'false');
+    if (partyTab === 'seller' || p.is_shared) {
+      fillPartyBankInfo(formPrefixNow, p.bank_info);
+    }
+  }
 }
 
 function editParty(id) {
@@ -2090,7 +2381,7 @@ function editParty(id) {
   if (!p) return;
   editingPartyId = id;
   copyingPartyId = null;
-  partyTab = p.kind === 'buyer' ? 'buyer' : 'seller';
+  partyTab = p.is_shared ? 'shared' : p.kind === 'buyer' ? 'buyer' : 'seller';
   parties();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2100,7 +2391,7 @@ function copyParty(id) {
   if (!p) return;
   editingPartyId = null;
   copyingPartyId = id;
-  partyTab = p.kind === 'buyer' ? 'buyer' : 'seller';
+  partyTab = p.is_shared ? 'shared' : p.kind === 'buyer' ? 'buyer' : 'seller';
   parties();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2144,7 +2435,7 @@ async function savePartyKind(kind) {
     }
     editingPartyId = null;
     copyingPartyId = null;
-    partyTab = kind === 'seller' ? 'seller' : 'buyer';
+    partyTab = payload.is_shared ? 'shared' : payload.kind === 'buyer' ? 'buyer' : 'seller';
     parties();
   } catch (e) {
     const msg = String(e.message || '');
@@ -2175,6 +2466,7 @@ let copyingProductId = null;
 let productsCache = [];
 let editingMappingSiteId = null;
 let mappingsCache = [];
+let mappingsSitesCache = [];
 
 async function products() {
   const data = await api('/admin/api/products');
@@ -2228,18 +2520,20 @@ async function products() {
     <table class="pg-table products-table" style="margin-top:1rem"><thead><tr>
       <th>${t('products.code')}</th><th>${t('products.name')}</th><th>${t('products.unit')}</th><th>${t('products.currency')}</th><th>${t('products.remark')}</th><th class="inv-col-manage">${t('col.manage')}</th>
     </tr></thead>
-    <tbody>${productsCache.map((p) => `<tr>
+    <tbody>${pagerSlice('products', productsCache).map((p) => `<tr class="pg-row-edit" ondblclick="onRowDblEdit(event,'editProduct','${p.id}')">
       <td class="mono">${escHtml(p.code)}</td>
       <td>${escHtml(p.name)}</td>
       <td>${escHtml(p.unit)}</td>
       <td>${escHtml(p.default_currency)}</td>
       <td>${escHtml(p.remark || '—')}</td>
-      <td style="white-space:nowrap">
+      <td class="inv-col-manage" style="white-space:nowrap">
         <button class="pg-btn" style="margin:0" type="button" onclick="editProduct('${p.id}')">${t('products.edit')}</button>
         <button class="pg-btn" style="margin:0" type="button" onclick="copyProduct('${p.id}')">${t('products.copy')}</button>
         <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteProduct('${p.id}','${escHtml(p.code)}')">${t('products.delete')}</button>
       </td>
-    </tr>`).join('') || `<tr><td colspan="6">${t('products.empty')}</td></tr>`}</tbody></table></div></div>`;
+    </tr>`).join('') || `<tr><td colspan="6">${t('products.empty')}</td></tr>`}</tbody></table>
+    ${renderPageSizeBar('products', productsCache.length)}
+    </div></div>`;
   if (formSource) {
     document.getElementById('prCode').value = formSource.code || '';
     document.getElementById('prName').value = formSource.name || '';
@@ -2343,13 +2637,26 @@ async function mappings() {
     api('/admin/api/mappings'), api('/admin/api/sites'), api('/admin/api/parties'), api('/admin/api/products')
   ]);
   mappingsCache = maps.items || [];
+  mappingsSitesCache = sites.items || [];
   const siteList = sites.items || [];
-  const siteOpts = siteList.map((i) => `<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.code)})</option>`).join('');
-  const partyOpts = (kind) => (parties.items||[])
-    .filter((p) => !kind || p.kind === kind || p.kind === 'both')
-    .map((i) => `<option value="${i.id}" data-site="${i.site_id||''}">[${escHtml(i.site_code||'?')}] ${escHtml(i.code)} — ${escHtml(i.legal_name)}</option>`)
-    .join('');
-  const prodOpts = (products.items||[]).map((i) => `<option value="${i.id}">${escHtml(i.code)} — ${escHtml(i.name)}</option>`).join('');
+  const siteOpts = siteList.map((i) => `<option value="${i.id}" data-shared="${i.use_shared_parties ? '1' : '0'}">${escHtml(i.name)} (${escHtml(i.code)})</option>`).join('');
+  const partyOpts = (kind) => {
+    const list = (parties.items || []).filter(
+      (p) => !kind || p.kind === kind || p.kind === 'both' || p.is_shared,
+    );
+    const opts = list
+      .map(
+        (i) =>
+          `<option value="${i.id}" data-site="${i.site_id || ''}" data-shared="${i.is_shared ? '1' : '0'}">[${escHtml(i.site_code || '?')}] ${escHtml(i.code)} — ${escHtml(i.legal_name)}${i.is_shared ? ` (${escHtml(t('parties.isSharedYes'))})` : ''}</option>`,
+      )
+      .join('');
+    return `<option value="">${escHtml(t('mappings.selectParty'))}</option>${opts}`;
+  };
+  const prodOpts =
+    `<option value="">${escHtml(t('mappings.selectProduct'))}</option>` +
+    (products.items || [])
+      .map((i) => `<option value="${i.id}">${escHtml(i.code)} — ${escHtml(i.name)}</option>`)
+      .join('');
   const editing = editingMappingSiteId
     ? mappingsCache.find((m) => m.site_id === editingMappingSiteId)
     : null;
@@ -2357,10 +2664,11 @@ async function mappings() {
     <p class="pg-card-hint">${t('mappings.hint')}</p>
     <div class="party-form-card" style="margin-top:.35rem">
       <h3>${editing ? t('mappings.editTitle') : t('mappings.add')}</h3>
+      <input type="hidden" id="mSiteId" value="${editing ? escHtml(editing.site_id) : ''}"/>
       <div class="pg-row">
         <div><label class="pg-label">${t('mappings.site')}</label><select class="pg-select" id="mSite" onchange="filterMappingParties()" ${editing ? 'disabled' : ''}>${siteOpts}</select></div>
-        <div><label class="pg-label">${t('mappings.seller')}</label><select class="pg-select" id="mSeller">${partyOpts('seller')}</select></div>
-        <div><label class="pg-label">${t('mappings.buyer')}</label><select class="pg-select" id="mBuyer">${partyOpts('buyer')}</select></div>
+        <div><label class="pg-label">${t('mappings.seller')}</label><select class="pg-select" id="mSeller" onchange="ensureMappingPartiesDistinct()">${partyOpts('seller')}</select></div>
+        <div><label class="pg-label">${t('mappings.buyer')}</label><select class="pg-select" id="mBuyer" onchange="ensureMappingPartiesDistinct()">${partyOpts('buyer')}</select></div>
         <div><label class="pg-label">${t('mappings.product')}</label><select class="pg-select" id="mProduct">${prodOpts}</select></div>
       </div>
       <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
@@ -2371,40 +2679,78 @@ async function mappings() {
     <table class="pg-table mappings-table" style="margin-top:1rem"><thead><tr>
       <th>${t('mappings.site')}</th><th>${t('mappings.seller')}</th><th>${t('mappings.buyer')}</th><th>${t('mappings.product')}</th><th class="inv-col-manage">${t('col.manage')}</th>
     </tr></thead>
-    <tbody>${mappingsCache.map((m) => `<tr>
+    <tbody>${pagerSlice('mappings', mappingsCache).map((m) => `<tr class="pg-row-edit" ondblclick="onRowDblEdit(event,'editMapping','${m.site_id}')">
       <td>${escHtml(m.site_code)}</td>
       <td>${escHtml(m.seller_name||m.seller_code)} <span class="mono muted">(${escHtml(m.seller_code)})</span></td>
       <td>${escHtml(m.buyer_name||m.buyer_code)} <span class="mono muted">(${escHtml(m.buyer_code)})</span></td>
       <td>${escHtml(m.product_name||m.product_code)}</td>
-      <td style="white-space:nowrap">
+      <td class="inv-col-manage" style="white-space:nowrap">
         <button class="pg-btn" style="margin:0" type="button" onclick="editMapping('${m.site_id}')">${t('mappings.edit')}</button>
         <button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteMapping('${m.site_id}','${escHtml(m.site_code)}')">${t('mappings.delete')}</button>
       </td>
-    </tr>`).join('') || `<tr><td colspan="5">${t('mappings.empty')}</td></tr>`}</tbody></table></div></div>`;
+    </tr>`).join('') || `<tr><td colspan="5">${t('mappings.empty')}</td></tr>`}</tbody></table>
+    ${renderPageSizeBar('mappings', mappingsCache.length)}
+    </div></div>`;
   if (editing) {
+    const sid = String(editing.seller_party_id || '');
+    const bid = String(editing.buyer_party_id || '');
     document.getElementById('mSite').value = editing.site_id;
-    filterMappingParties();
-    document.getElementById('mSeller').value = editing.seller_party_id;
-    document.getElementById('mBuyer').value = editing.buyer_party_id;
+    document.getElementById('mSiteId').value = editing.site_id;
+    filterMappingParties([sid, bid]);
+    document.getElementById('mSeller').value = sid;
+    document.getElementById('mBuyer').value = bid;
     document.getElementById('mProduct').value = editing.product_id;
   } else {
     filterMappingParties();
   }
 }
 
-function filterMappingParties() {
-  const siteId = document.getElementById('mSite')?.value;
-  ['mSeller','mBuyer'].forEach((id) => {
+function filterMappingParties(preserveIds) {
+  const siteSel = document.getElementById('mSite');
+  const siteId = String(siteSel?.value || document.getElementById('mSiteId')?.value || '');
+  const preserve = new Set(
+    [...(Array.isArray(preserveIds) ? preserveIds : []), document.getElementById('mSeller')?.value, document.getElementById('mBuyer')?.value]
+      .map((v) => String(v || ''))
+      .filter(Boolean),
+  );
+  ['mSeller', 'mBuyer'].forEach((id) => {
     const sel = document.getElementById(id);
     if (!sel) return;
+    const current = String(sel.value || '');
     [...sel.options].forEach((o) => {
-      if (!o.value) return;
-      const match = !siteId || o.dataset.site === siteId || !o.dataset.site;
-      o.hidden = !match;
+      if (!o.value) {
+        o.disabled = false;
+        o.hidden = false;
+        return;
+      }
+      const optSite = String(o.dataset.site || '');
+      const sameSite = !siteId || !optSite || optSite === siteId;
+      // Shared parties are selectable from any site (not limited to the mapping site)
+      const sharedOk = o.dataset.shared === '1';
+      const keep = preserve.has(String(o.value));
+      const allowed = sameSite || sharedOk || keep;
+      o.disabled = !allowed;
+      o.hidden = !allowed;
     });
-    const visible = [...sel.options].find((o) => o.value && !o.hidden);
-    if (visible && sel.selectedOptions[0]?.hidden) sel.value = visible.value;
+    const stillOk = current && [...sel.options].some((o) => String(o.value) === current && !o.disabled);
+    if (stillOk) {
+      sel.value = current;
+    } else {
+      const visible = [...sel.options].find((o) => o.value && !o.disabled);
+      sel.value = visible ? visible.value : '';
+    }
   });
+  ensureMappingPartiesDistinct();
+}
+
+function ensureMappingPartiesDistinct() {
+  const seller = document.getElementById('mSeller');
+  const buyer = document.getElementById('mBuyer');
+  if (!seller || !buyer) return;
+  if (seller.value && buyer.value && seller.value === buyer.value) {
+    const alt = [...buyer.options].find((o) => o.value && !o.hidden && !o.disabled && o.value !== seller.value);
+    if (alt) buyer.value = alt.value;
+  }
 }
 
 function editMapping(siteId) {
@@ -2419,15 +2765,30 @@ function cancelMappingEdit() {
 }
 
 async function saveMapping() {
-  const siteId = document.getElementById('mSite')?.value;
-  if (!siteId) return;
+  const siteId =
+    document.getElementById('mSiteId')?.value || document.getElementById('mSite')?.value;
+  if (!siteId) {
+    flash(t('mappings.required'));
+    return;
+  }
+  const seller_party_id = document.getElementById('mSeller')?.value;
+  const buyer_party_id = document.getElementById('mBuyer')?.value;
+  const product_id = document.getElementById('mProduct')?.value;
+  if (!seller_party_id || !buyer_party_id || !product_id) {
+    flash(t('mappings.required'));
+    return;
+  }
+  if (seller_party_id === buyer_party_id) {
+    flash(t('mappings.sameParty'));
+    return;
+  }
   try {
     await api(`/admin/api/mappings/${siteId}`, {
       method: 'PUT',
       body: JSON.stringify({
-        seller_party_id: document.getElementById('mSeller')?.value,
-        buyer_party_id: document.getElementById('mBuyer')?.value,
-        product_id: document.getElementById('mProduct')?.value,
+        seller_party_id,
+        buyer_party_id,
+        product_id,
       }),
     });
     flash(editingMappingSiteId ? t('mappings.updated') : t('mappings.saved'));
@@ -2449,6 +2810,597 @@ async function deleteMapping(siteId, siteCode) {
   } catch (e) {
     const msg = String(e.message || '');
     flash(msg.startsWith('mappings.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+let mergedSiteId = '';
+const _mergedRange0 = defaultDateRange(7);
+let mergedFrom = _mergedRange0.from;
+let mergedTo = _mergedRange0.to;
+let mergedBuyerCode = '';
+let mergedSellerCode = '';
+/** true only after 불러오기 / period preset — avoids silent auto-search */
+let mergedLoadCandidates = false;
+let mergedPresetKind = '';
+let mergedPdfMode = 'lines';
+let mergedSelectAction = ''; // 'all' | 'none' | ''
+let mergedLastAction = ''; // 'load' | 'reset' | 'create' | ''
+let mergedCandidates = [];
+let mergedListCache = [];
+let mergedViewId = null;
+
+function mergedMonthBounds(offsetMonths) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + offsetMonths;
+  const start = new Date(y, m, 1);
+  const end = new Date(y, m + 1, 0);
+  return { from: fmtDateInput(start), to: fmtDateInput(end) };
+}
+
+function setMergedRangePreset(kind) {
+  mergedPresetKind = kind;
+  mergedLastAction = '';
+  const today = new Date();
+  let from = today;
+  let to = today;
+  if (kind === 'today') {
+    from = today;
+    to = today;
+  } else if (kind === 'yesterday') {
+    const y = new Date(today);
+    y.setDate(y.getDate() - 1);
+    from = y;
+    to = y;
+  } else if (kind === 'week1') {
+    from = new Date(today);
+    from.setDate(from.getDate() - 6);
+    to = today;
+  } else if (kind === 'week2') {
+    from = new Date(today);
+    from.setDate(from.getDate() - 13);
+    to = today;
+  } else if (kind === 'month0') {
+    const b = mergedMonthBounds(0);
+    mergedFrom = b.from;
+    mergedTo = fmtDateInput(today);
+    mergedLoadCandidates = true;
+    merged();
+    return;
+  } else if (kind === 'month1') {
+    const b = mergedMonthBounds(-1);
+    mergedFrom = b.from;
+    mergedTo = b.to;
+    mergedLoadCandidates = true;
+    merged();
+    return;
+  } else if (kind === 'month2') {
+    const b = mergedMonthBounds(-2);
+    mergedFrom = b.from;
+    mergedTo = b.to;
+    mergedLoadCandidates = true;
+    merged();
+    return;
+  }
+  mergedFrom = fmtDateInput(from);
+  mergedTo = fmtDateInput(to);
+  mergedLoadCandidates = true;
+  merged();
+}
+
+async function merged() {
+  const sites = await api('/admin/api/sites');
+  const siteList = sites.items || [];
+  if (!mergedFrom || !mergedTo) {
+    const r = defaultDateRange(7);
+    mergedFrom = r.from;
+    mergedTo = r.to;
+  }
+  const siteOpts =
+    `<option value="">${escHtml(t('invoices.filter.all'))}</option>` +
+    siteList
+      .map((s) => `<option value="${s.id}" ${s.id === mergedSiteId ? 'selected' : ''}>${escHtml(s.name)} (${escHtml(s.code)})</option>`)
+      .join('');
+
+  let parties = { items: [] };
+  try {
+    parties = await api('/admin/api/parties');
+  } catch {
+    parties = { items: [] };
+  }
+  const partyList = (parties.items || []).filter(
+    (p) => p.active !== false && (p.is_shared || !mergedSiteId || p.site_id === mergedSiteId),
+  );
+  const partySelectOpts = (kind, selectedCode) => {
+    const list = partyList.filter(
+      (p) => !kind || p.kind === kind || p.kind === 'both' || p.is_shared,
+    );
+    const seen = new Set();
+    const opts = list
+      .filter((p) => {
+        const c = String(p.code || '').trim().toLowerCase();
+        if (!c || seen.has(c)) return false;
+        seen.add(c);
+        return true;
+      })
+      .map((p) => {
+        const c = String(p.code || '').trim();
+        const sel = c.toLowerCase() === String(selectedCode || '').toLowerCase() ? 'selected' : '';
+        return `<option value="${escHtml(c)}" ${sel}>${escHtml(c)} — ${escHtml(p.legal_name || '')}</option>`;
+      })
+      .join('');
+    return `<option value="">${escHtml(t('invoices.filter.all'))}</option>${opts}`;
+  };
+  const buyerOpts = partySelectOpts('buyer', mergedBuyerCode);
+  const sellerOpts = partySelectOpts('seller', mergedSellerCode);
+
+  const qs = new URLSearchParams();
+  if (mergedSiteId) qs.set('site', mergedSiteId);
+  qs.set('includeDeleted', '1');
+  const listData = await api('/admin/api/merged?' + qs.toString());
+  mergedListCache = listData.items || [];
+
+  let candHtml = `<p class="pg-card-hint">${t('merged.candidatesHint')}</p>`;
+  if (mergedLoadCandidates && mergedFrom && mergedTo) {
+    try {
+      const candQs = new URLSearchParams({
+        from: mergedFrom,
+        to: mergedTo,
+      });
+      if (mergedSiteId) candQs.set('siteId', mergedSiteId);
+      if (mergedBuyerCode) candQs.set('buyerCode', mergedBuyerCode);
+      if (mergedSellerCode) candQs.set('sellerCode', mergedSellerCode);
+      const cand = await api(`/admin/api/merged/candidates?${candQs.toString()}`);
+      mergedCandidates = cand.items || [];
+      const groups = {};
+      mergedCandidates.forEach((c) => {
+        (groups[c.group_key] = groups[c.group_key] || []).push(c);
+      });
+      const groupKeys = Object.keys(groups);
+      if (!groupKeys.length) {
+        candHtml = `<p class="pg-card-hint">${t('merged.candidatesEmpty')}</p>`;
+      } else {
+        candHtml = groupKeys
+          .map((gk) => {
+            const rows = groups[gk];
+            const sample = rows[0];
+            return `<div class="party-form-card" style="margin-top:.5rem">
+              <p class="pg-card-hint">${escHtml(sample.site_code || '')} · ${escHtml(sample.currency)} · ${escHtml(sample.seller_code || '')} ${escHtml(sample.seller_name || '')} → ${escHtml(sample.buyer_code || '')} ${escHtml(sample.buyer_name || '')}</p>
+              <table class="pg-table"><thead><tr>
+                <th></th><th>${t('invoices.col.no')}</th><th>${t('invoices.col.issued')}</th><th>${t('invoices.col.amount')}</th>
+                <th>${t('merged.sellerCode')}</th><th>${t('merged.seller')}</th>
+                <th>${t('merged.buyerCode')}</th><th>${t('merged.buyer')}</th>
+                <th>${t('products.name')}</th>
+              </tr></thead><tbody>
+              ${rows
+                .map(
+                  (r) => `<tr>
+                <td><input type="checkbox" class="merged-cand" value="${r.id}" data-group="${escHtml(gk)}" data-site="${escHtml(r.site_id)}"/></td>
+                <td class="mono">${escHtml(r.invoice_no)}</td>
+                <td>${escHtml(r.date || String(r.issued_at).slice(0, 10))}</td>
+                <td>${escHtml(fmtMoney(r.amount, r.currency))} ${escHtml(r.currency)}</td>
+                <td class="mono">${escHtml(r.seller_code || '')}</td>
+                <td>${escHtml(r.seller_name || '')}</td>
+                <td class="mono">${escHtml(r.buyer_code || '')}</td>
+                <td>${escHtml(r.buyer_name || '')}</td>
+                <td>${escHtml(r.product_name)}</td>
+              </tr>`,
+                )
+                .join('')}
+              </tbody></table>
+            </div>`;
+          })
+          .join('');
+      }
+    } catch (e) {
+      const msg = String(e.message || '');
+      candHtml = `<p class="pg-card-hint">${escHtml(msg.startsWith('merged.') ? t(msg) : msg || t('error.generic'))}</p>`;
+    }
+  }
+
+  const chip = (cls, label, onclick, active) =>
+    `<button type="button" class="merged-chip ${cls}${active ? ' is-active' : ''}" onclick="${onclick}">${label}</button>`;
+  const preset = (id, label) =>
+    chip('chip-preset', label, `setMergedRangePreset('${id}')`, mergedPresetKind === id);
+
+  const pageList = pagerSlice('merged', mergedListCache);
+  content.innerHTML = `<div class="pg-card merged-page"><div class="pg-card-head">${t('merged.title')}</div><div class="pg-card-body">
+    <p class="pg-card-hint">${t('merged.hint')}</p>
+    <div class="party-form-card" style="margin-top:.5rem">
+      <h3>${t('merged.createTitle')}</h3>
+      <div class="merged-filter-bar">
+        <div class="merged-filter-group">
+          <div class="merged-filter-field">
+            <label class="pg-label">${t('mappings.site')}</label>
+            <select class="pg-select" id="mergedSite" onchange="onMergedSiteChange()">${siteOpts}</select>
+          </div>
+        </div>
+        <div class="merged-filter-group">
+          <div class="merged-filter-field merged-filter-field-party">
+            <label class="pg-label">${t('merged.buyer')}</label>
+            <select class="pg-select" id="mergedBuyer" onchange="mergedBuyerCode=this.value">${buyerOpts}</select>
+          </div>
+          <div class="merged-filter-field merged-filter-field-party">
+            <label class="pg-label">${t('merged.seller')}</label>
+            <select class="pg-select" id="mergedSeller" onchange="mergedSellerCode=this.value">${sellerOpts}</select>
+          </div>
+        </div>
+        <div class="merged-filter-group">
+          <div class="merged-filter-field">
+            <label class="pg-label">${t('merged.from')}</label>
+            <input class="pg-input" type="date" id="mergedFrom" value="${escHtml(mergedFrom)}" onchange="mergedPresetKind='';mergedFrom=this.value"/>
+          </div>
+          <div class="merged-filter-field">
+            <label class="pg-label">${t('merged.to')}</label>
+            <input class="pg-input" type="date" id="mergedTo" value="${escHtml(mergedTo)}" onchange="mergedPresetKind='';mergedTo=this.value"/>
+          </div>
+        </div>
+        <div class="merged-filter-group merged-filter-presets">
+          ${preset('month2', t('merged.preset.month2'))}
+          ${preset('month1', t('merged.preset.month1'))}
+          ${preset('month0', t('merged.preset.month0'))}
+          ${preset('today', t('merged.preset.today'))}
+          ${preset('yesterday', t('merged.preset.yesterday'))}
+          ${preset('week1', t('merged.preset.week1'))}
+          ${preset('week2', t('merged.preset.week2'))}
+        </div>
+        <div class="merged-filter-group merged-filter-actions">
+          ${chip('chip-load', t('merged.loadCandidates'), 'loadMergedCandidates()', mergedLastAction === 'load')}
+        </div>
+        <div class="merged-filter-group merged-filter-actions-right">
+          ${chip('chip-reset', t('merged.reset'), 'resetMergedFilters()', mergedLastAction === 'reset')}
+          ${chip('chip-select-all', t('merged.selectAll'), 'setMergedCandidatesChecked(true)', mergedSelectAction === 'all')}
+          ${chip('chip-deselect', t('merged.deselectAll'), 'setMergedCandidatesChecked(false)', mergedSelectAction === 'none')}
+          ${chip('chip-mode', t('merged.mode.lines'), "setMergedPdfMode('lines')", mergedPdfMode === 'lines').replace('class="merged-chip', 'data-mode="lines" class="merged-chip')}
+          ${chip('chip-mode', t('merged.mode.total'), "setMergedPdfMode('total')", mergedPdfMode === 'total').replace('class="merged-chip', 'data-mode="total" class="merged-chip')}
+          ${chip('chip-create', t('merged.create'), 'createMerged()', mergedLastAction === 'create')}
+        </div>
+      </div>
+      ${candHtml}
+    </div>
+
+    <h3 style="margin-top:1.25rem">${t('merged.listTitle')}</h3>
+    <table class="pg-table" style="margin-top:.5rem"><thead><tr>
+      <th>${t('invoices.col.no')}</th>
+      <th>${t('mappings.site')}</th>
+      <th>${t('invoices.col.issued')}</th>
+      <th>${t('invoices.col.amount')}</th>
+      <th>${t('merged.mode')}</th>
+      <th>${t('merged.kind')}</th>
+      <th>${t('merged.deleted')}</th>
+      <th class="inv-col-manage">${t('col.manage')}</th>
+    </tr></thead>
+    <tbody>${
+      pageList
+        .map((m) => {
+          const del = m.deleted_at ? t('merged.deletedYes') : t('merged.deletedNo');
+          const kind = m.kind === 'original' ? t('merged.kind.original') : t('merged.kind.revision', { n: m.revision_no });
+          const modeLabel = m.mode === 'total' ? t('merged.mode.total') : t('merged.mode.lines');
+          return `<tr class="pg-row-edit ${m.deleted_at ? 'inv-row-deleted' : ''}" ondblclick="onMergedRowDbl(event,'${m.id}')">
+            <td class="mono">${escHtml(m.invoice_no)}</td>
+            <td>${escHtml(m.site_code)}</td>
+            <td>${escHtml(String(m.issued_at).slice(0, 10))}</td>
+            <td>${escHtml(fmtMoney(m.amount, m.currency))} ${escHtml(m.currency)}</td>
+            <td>${modeLabel}</td>
+            <td>${kind}</td>
+            <td>${del}</td>
+            <td class="inv-col-manage" style="white-space:nowrap">
+              <button class="pg-btn" style="margin:0" type="button" onclick="openMergedDetail('${m.id}')">${t('merged.open')}</button>
+              ${
+                m.deleted_at
+                  ? ''
+                  : `<button class="pg-btn" style="margin:0" type="button" onclick="openMergedDetail('${m.id}')">${t('merged.edit')}</button>`
+              }
+              <button class="pg-btn" style="margin:0" type="button" onclick="previewMergedPdf('${m.id}')">${t('merged.preview')}</button>
+              <a class="pg-btn" style="margin:0;display:inline-block;text-decoration:none" href="/admin/api/merged/${m.id}/pdf" target="_blank">${t('merged.pdf')}</a>
+              ${
+                m.deleted_at
+                  ? ''
+                  : `<button class="pg-btn pg-btn-danger" style="margin:0" type="button" onclick="deleteMerged('${m.id}','${escHtml(m.invoice_no)}')">${t('merged.delete')}</button>`
+              }
+            </td>
+          </tr>`;
+        })
+        .join('') || `<tr><td colspan="8">${t('merged.empty')}</td></tr>`
+    }</tbody></table>
+    ${renderPageSizeBar('merged', mergedListCache.length)}
+    <div id="mergedDetailBox" style="margin-top:1rem"></div>
+  </div></div>`;
+
+  if (mergedViewId) {
+    openMergedDetail(mergedViewId);
+  }
+}
+
+async function onMergedSiteChange() {
+  mergedSiteId = document.getElementById('mergedSite')?.value || '';
+  mergedBuyerCode = '';
+  mergedSellerCode = '';
+  await merged();
+}
+
+async function loadMergedCandidates() {
+  mergedSiteId = document.getElementById('mergedSite')?.value || '';
+  mergedBuyerCode = String(document.getElementById('mergedBuyer')?.value || '').trim();
+  mergedSellerCode = String(document.getElementById('mergedSeller')?.value || '').trim();
+  mergedFrom = document.getElementById('mergedFrom')?.value || mergedFrom;
+  mergedTo = document.getElementById('mergedTo')?.value || mergedTo;
+  if (!mergedFrom || !mergedTo) {
+    flash(t('merged.candidatesRequired'));
+    return;
+  }
+  if (mergedFrom > mergedTo) {
+    flash(t('merged.invalidDateRange'));
+    return;
+  }
+  mergedLastAction = 'load';
+  mergedLoadCandidates = true;
+  await merged();
+}
+
+async function resetMergedFilters() {
+  mergedSiteId = '';
+  mergedBuyerCode = '';
+  mergedSellerCode = '';
+  const r = defaultDateRange(7);
+  mergedFrom = r.from;
+  mergedTo = r.to;
+  mergedCandidates = [];
+  mergedLoadCandidates = false;
+  mergedPresetKind = '';
+  mergedSelectAction = '';
+  mergedPdfMode = 'lines';
+  mergedLastAction = 'reset';
+  await merged();
+}
+
+function setMergedPdfMode(mode) {
+  mergedPdfMode = mode === 'total' ? 'total' : 'lines';
+  document.querySelectorAll('.merged-chip.chip-mode').forEach((el) => {
+    el.classList.toggle('is-active', el.getAttribute('data-mode') === mergedPdfMode);
+  });
+}
+
+function setMergedCandidatesChecked(on) {
+  const boxes = [...document.querySelectorAll('.merged-cand')];
+  if (!boxes.length) {
+    flash(t('merged.candidatesEmpty'));
+    return;
+  }
+  if (!on) {
+    boxes.forEach((el) => {
+      el.checked = false;
+    });
+    mergedSelectAction = 'none';
+    document.querySelectorAll('.merged-chip.chip-select-all, .merged-chip.chip-deselect').forEach((el) => {
+      el.classList.toggle('is-active', el.classList.contains('chip-deselect'));
+    });
+    return;
+  }
+  const checked = boxes.filter((el) => el.checked);
+  const targetGroup = checked[0]?.dataset.group || boxes[0]?.dataset.group;
+  boxes.forEach((el) => {
+    el.checked = el.dataset.group === targetGroup;
+  });
+  mergedSelectAction = 'all';
+  document.querySelectorAll('.merged-chip.chip-select-all, .merged-chip.chip-deselect').forEach((el) => {
+    el.classList.toggle('is-active', el.classList.contains('chip-select-all'));
+  });
+  const groupCount = new Set(boxes.map((el) => el.dataset.group)).size;
+  if (groupCount > 1) {
+    flash(t('merged.selectAllOneGroup'));
+  }
+}
+
+async function createMerged() {
+  let siteId = document.getElementById('mergedSite')?.value || mergedSiteId;
+  const from = document.getElementById('mergedFrom')?.value || mergedFrom;
+  const to = document.getElementById('mergedTo')?.value || mergedTo;
+  const mode = mergedPdfMode || 'lines';
+  const checked = [...document.querySelectorAll('.merged-cand:checked')];
+  if (checked.length < 2) {
+    flash(t('merged.minTwo'));
+    return;
+  }
+  const groups = new Set(checked.map((c) => c.dataset.group));
+  if (groups.size > 1) {
+    flash(t('merged.sameGroupRequired'));
+    return;
+  }
+  if (!siteId) {
+    siteId = checked[0]?.dataset.site || '';
+  }
+  if (!siteId) {
+    flash(t('merged.siteNotFound'));
+    return;
+  }
+  try {
+    const d = await api('/admin/api/merged', {
+      method: 'POST',
+      body: JSON.stringify({
+        siteId,
+        from,
+        to,
+        mode,
+        sourceIds: checked.map((c) => c.value),
+      }),
+    });
+    flash(t('merged.created', { no: d.merged?.invoice_no || '' }));
+    mergedViewId = d.merged?.id || null;
+    mergedLastAction = 'create';
+    mergedLoadCandidates = true;
+    await merged();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('merged.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+function previewMergedPdf(id) {
+  window.open(`/admin/api/merged/${id}/pdf`, '_blank', 'noopener,width=960,height=720');
+}
+
+function onMergedRowDbl(ev, id) {
+  if (ev.target.closest('button, a, input, select, textarea, .inv-col-manage')) return;
+  openMergedDetail(id);
+}
+
+async function openMergedDetail(id) {
+  mergedViewId = id;
+  const box = document.getElementById('mergedDetailBox');
+  if (!box) {
+    await merged();
+    return;
+  }
+  try {
+    const d = await api(`/admin/api/merged/${id}`);
+    const m = d.merged;
+    const seller = m.seller_snapshot || {};
+    const buyer = m.buyer_snapshot || {};
+    const isOriginal = !!d.is_original;
+    const deleted = !!m.deleted_at;
+    const versions = (d.versions || [])
+      .map(
+        (v) =>
+          `<button type="button" class="pg-btn ${v.id === id ? 'pg-btn-primary' : ''}" style="margin:0" onclick="openMergedDetail('${v.id}')">${escHtml(v.invoice_no)}${v.deleted_at ? ' [' + t('merged.deletedYes') + ']' : ''}</button>`,
+      )
+      .join(' ');
+    const items = d.items || [];
+    const itemRows = items
+      .map(
+        (it, i) => `<tr data-idx="${i}">
+        <td><input class="pg-input mi-item" data-f="item_name" value="${escHtml(it.item_name || '')}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-code" data-f="product_code" value="${escHtml(it.product_code || '')}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-desc" data-f="description" value="${escHtml(it.description || '')}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-qty" data-f="quantity" value="${escHtml(it.quantity)}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-unit" data-f="unit" value="${escHtml(it.unit || '')}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-up" data-f="unit_price" value="${escHtml(it.unit_price)}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-amt" data-f="amount" value="${escHtml(it.amount)}" ${deleted ? 'readonly' : ''}/></td>
+        <td><input class="pg-input mi-rmk" data-f="remark" value="${escHtml(it.remark || '')}" ${deleted ? 'readonly' : ''}/></td>
+      </tr>`,
+      )
+      .join('');
+
+    box.innerHTML = `<div class="party-form-card">
+      <h3>${t('merged.detailTitle')} · <span class="mono">${escHtml(m.invoice_no)}</span>
+        <span class="pg-card-hint" style="font-weight:400;margin-left:.5rem">${isOriginal ? t('merged.kind.original') : t('merged.kind.revision', { n: m.revision_no })}</span>
+      </h3>
+      <p class="pg-card-hint">${t('merged.versions')}: ${versions || '—'}</p>
+      <p class="pg-card-hint">${t('merged.sources')}: ${(d.sources || []).map((s) => escHtml(s.invoice_no)).join(', ') || '—'}</p>
+      ${isOriginal && !deleted ? `<p class="pg-card-hint">${t('merged.originalReadonlyHint')}</p>` : ''}
+      <div class="pg-row">
+        <div><label class="pg-label">${t('invoices.col.currency')}</label>
+          <input class="pg-input" id="mCur" value="${escHtml(m.currency)}" ${deleted ? 'readonly' : ''}/></div>
+        <div><label class="pg-label">${t('invoices.col.amount')}</label>
+          <input class="pg-input" id="mAmt" value="${escHtml(m.amount)}" ${deleted ? 'readonly' : ''}/></div>
+        <div><label class="pg-label">${t('merged.mode')}</label>
+          <select class="pg-select" id="mMode" ${deleted ? 'disabled' : ''}>
+            <option value="lines" ${m.mode === 'lines' ? 'selected' : ''}>${t('merged.mode.lines')}</option>
+            <option value="total" ${m.mode === 'total' ? 'selected' : ''}>${t('merged.mode.total')}</option>
+          </select></div>
+        <div><label class="pg-label">${t('invoices.col.memo') || 'Memo'}</label>
+          <input class="pg-input" id="mMemo" value="${escHtml(m.memo || '')}" ${deleted ? 'readonly' : ''}/></div>
+      </div>
+      <div class="pg-row" style="margin-top:.5rem">
+        <div><label class="pg-label">${t('mappings.seller')}</label>
+          <input class="pg-input" id="mSellerName" value="${escHtml(seller.legal_name || '')}" ${deleted ? 'readonly' : ''}/></div>
+        <div><label class="pg-label">${t('mappings.buyer')}</label>
+          <input class="pg-input" id="mBuyerName" value="${escHtml(buyer.legal_name || '')}" ${deleted ? 'readonly' : ''}/></div>
+        <div><label class="pg-label">${t('parties.code')} (seller)</label>
+          <input class="pg-input" id="mSellerCode" value="${escHtml(seller.code || '')}" ${deleted ? 'readonly' : ''}/></div>
+        <div><label class="pg-label">${t('parties.code')} (buyer)</label>
+          <input class="pg-input" id="mBuyerCode" value="${escHtml(buyer.code || '')}" ${deleted ? 'readonly' : ''}/></div>
+      </div>
+      <table class="pg-table" style="margin-top:.75rem"><thead><tr>
+        <th>${t('products.name')}</th><th>${t('products.code')}</th><th>${t('products.description')}</th>
+        <th>Qty</th><th>${t('products.unit')}</th><th>Unit price</th><th>${t('invoices.col.amount')}</th><th>Remark</th>
+      </tr></thead><tbody id="mergedItemsBody">${itemRows}</tbody></table>
+      ${
+        deleted
+          ? `<div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
+        <p class="pg-card-hint" style="margin:0">${t('merged.deletedReadonly')}</p>
+        <a class="pg-btn" href="/admin/api/merged/${id}/pdf" target="_blank">${t('merged.pdf')}</a>
+        <button class="pg-btn" type="button" onclick="mergedViewId=null;document.getElementById('mergedDetailBox').innerHTML=''">${t('merged.closeDetail')}</button>
+      </div>`
+          : `<div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
+        <div><label class="pg-label">${t('users.otp')}</label>
+          <input class="pg-input" id="mergedOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"/></div>
+        <button class="pg-btn" type="button" onclick="requestInvoiceEditOtp()">${t('users.sendOtp')}</button>
+        <button class="pg-btn pg-btn-primary" type="button" onclick="saveMergedRevision('${id}')">${t('merged.saveAsRevision')}</button>
+        <a class="pg-btn" href="/admin/api/merged/${id}/pdf" target="_blank">${t('merged.pdf')}</a>
+        <button class="pg-btn" type="button" onclick="mergedViewId=null;document.getElementById('mergedDetailBox').innerHTML=''">${t('merged.closeDetail')}</button>
+      </div>
+      <p class="pg-card-hint" style="margin-top:.35rem">${t('merged.revisionHint')}</p>`
+      }
+    </div>`;
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    flash(String(e.message || t('error.generic')));
+  }
+}
+
+async function saveMergedRevision(fromId) {
+  let otp = document.getElementById('mergedOtp')?.value?.trim() || '';
+  if (!otp) otp = prompt(t('users.otpPrompt')) || '';
+  otp = String(otp).trim();
+  if (!otp) {
+    flash(t('users.otpRequired'));
+    return;
+  }
+  const items = [...document.querySelectorAll('#mergedItemsBody tr')].map((tr) => {
+    const get = (f) => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
+    return {
+      item_name: get('item_name'),
+      product_code: get('product_code'),
+      description: get('description'),
+      quantity: get('quantity'),
+      unit: get('unit'),
+      unit_price: get('unit_price'),
+      amount: get('amount'),
+      remark: get('remark'),
+    };
+  });
+  const seller = {
+    code: document.getElementById('mSellerCode')?.value || '',
+    legal_name: document.getElementById('mSellerName')?.value || '',
+  };
+  const buyer = {
+    code: document.getElementById('mBuyerCode')?.value || '',
+    legal_name: document.getElementById('mBuyerName')?.value || '',
+  };
+  try {
+    const d = await api(`/admin/api/merged/${fromId}/revisions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        otp,
+        currency: document.getElementById('mCur')?.value,
+        amount: document.getElementById('mAmt')?.value,
+        mode: document.getElementById('mMode')?.value,
+        memo: document.getElementById('mMemo')?.value,
+        seller_snapshot: seller,
+        buyer_snapshot: buyer,
+        items,
+      }),
+    });
+    flash(t('merged.revisionCreated', { no: d.merged?.invoice_no || '' }));
+    mergedViewId = d.merged?.id || null;
+    merged();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('merged.') || msg.startsWith('api.error.') ? t(msg) : msg || t('error.generic'));
+  }
+}
+
+async function deleteMerged(id, no) {
+  if (!confirm(t('merged.deleteConfirm', { no }))) return;
+  try {
+    await api(`/admin/api/merged/${id}`, { method: 'DELETE', body: '{}' });
+    flash(t('merged.deletedOk'));
+    if (mergedViewId === id) mergedViewId = null;
+    merged();
+  } catch (e) {
+    const msg = String(e.message || '');
+    flash(msg.startsWith('merged.') ? t(msg) : msg || t('error.generic'));
   }
 }
 
@@ -2765,11 +3717,9 @@ async function applyBranding() {
 }
 
 async function audit() {
-  const today = new Date();
-  const toDef = today.toISOString().slice(0, 10);
-  const fromDate = new Date(today);
-  fromDate.setDate(fromDate.getDate() - 30);
-  const fromDef = fromDate.toISOString().slice(0, 10);
+  const range = defaultDateRange(7);
+  const toDef = range.to;
+  const fromDef = range.from;
 
   content.innerHTML = `<div class="pg-card audit-page"><div class="pg-card-head">${t('audit.title')}</div><div class="pg-card-body">
     <p class="pg-card-hint">${t('audit.hint')}</p>
@@ -2958,19 +3908,20 @@ async function saveSite() {
   const name = document.getElementById('siteName')?.value?.trim() || '';
   const notes = document.getElementById('siteNotes')?.value || '';
   const active = document.getElementById('siteActive')?.value !== 'false';
+  const use_shared_parties = document.getElementById('siteUseSharedParties')?.value === 'true';
   if (!name) { flash(t('sites.nameRequired')); return; }
   try {
     if (editId) {
       await api(`/admin/api/sites/${editId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, notes, active }),
+        body: JSON.stringify({ name, notes, active, use_shared_parties }),
       });
       flash(t('sites.updated'));
     } else {
       if (!code) { flash(t('sites.codeRequired')); return; }
       await api('/admin/api/sites', {
         method: 'POST',
-        body: JSON.stringify({ code, name, notes, active }),
+        body: JSON.stringify({ code, name, notes, active, use_shared_parties }),
       });
       flash(t('sites.created'));
     }
@@ -2987,6 +3938,8 @@ function cancelSiteEdit() {
   document.getElementById('siteName').value = '';
   document.getElementById('siteNotes').value = '';
   document.getElementById('siteActive').value = 'true';
+  const shared = document.getElementById('siteUseSharedParties');
+  if (shared) shared.value = 'false';
   document.getElementById('siteSaveBtn').textContent = t('sites.add');
   document.getElementById('siteCancelBtn').classList.add('hidden');
 }
@@ -3001,6 +3954,8 @@ async function editSite(siteId) {
   document.getElementById('siteName').value = s.name || '';
   document.getElementById('siteNotes').value = s.notes || '';
   document.getElementById('siteActive').value = s.active === false ? 'false' : 'true';
+  const shared = document.getElementById('siteUseSharedParties');
+  if (shared) shared.value = s.use_shared_parties ? 'true' : 'false';
   document.getElementById('siteSaveBtn').textContent = t('sites.saveEdit');
   document.getElementById('siteCancelBtn').classList.remove('hidden');
   document.getElementById('siteName')?.focus();

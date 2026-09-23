@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
 
-  const CURRENT_LIVE_VERSION = '1.2.12';
+  const CURRENT_LIVE_VERSION = '1.2.13';
 
   function L(ko, en, ja, zh, th) {
     return { ko, en, ja: ja || en, zh: zh || en, th: th || en };
@@ -10,6 +10,33 @@
 
   /** @type {{ version: string, kind: 'major'|'minor', date: string, items: Record<string,string[]> }[]} */
   const RELEASE_NOTES = [
+    {
+      version: '1.2.13',
+      kind: 'minor',
+      date: '2026-09-23',
+      items: {
+        ko: [
+          '시뮬레이터 PDF 테스트 문구: 다국어 기본문 적용, 사이트에서 활성/비활성·문구 편집 가능.',
+          'TINPASS 시뮬레이터에서 건별로 테스트 문구 on/off 선택 가능.',
+        ],
+        en: [
+          'Simulator PDF disclaimer: localized defaults; site on/off and custom text.',
+          'TINPASS simulator can toggle the disclaimer per run.',
+        ],
+        ja: [
+          'シミュレーターPDFテスト文言: 多言語既定、サイトで有効/無効・文言編集。',
+          'TINPASSシミュレーターで実行ごとにオン/オフ可能。',
+        ],
+        zh: [
+          '模拟器 PDF 测试声明：多语言默认；站点可开关并自定义文案。',
+          'TINPASS 模拟器可按次开关声明。',
+        ],
+        th: [
+          'ข้อความทดสอบ PDF จำลอง: ค่าเริ่มต้นหลายภาษา เปิด/ปิดและแก้ข้อความที่ไซต์ได้',
+          'หน้าจอจำลอง TINPASS เลือกเปิด/ปิดทีละครั้งได้',
+        ],
+      },
+    },
     {
       version: '1.2.12',
       kind: 'minor',

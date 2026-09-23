@@ -46,9 +46,18 @@ function esc(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Last 3 digits of the integer amount (e.g. 1629457 → 457) */
+/** Last 3 digits of the integer amount (e.g. 1966629.00 → 629, not 000). */
 function amountTail3(amount: string | number): string {
-  const digits = String(amount ?? '').replace(/[^\d]/g, '');
+  const raw = String(amount ?? '').trim().replace(/,/g, '');
+  if (!raw) return '—';
+  // Prefer numeric parse so fractional ".00" does not become trailing digits
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    const intPart = Math.trunc(Math.abs(n)).toString();
+    return intPart.slice(-3).padStart(3, '0');
+  }
+  const beforeDot = raw.split('.')[0] ?? raw;
+  const digits = beforeDot.replace(/[^\d]/g, '');
   if (!digits) return '—';
   return digits.slice(-3).padStart(3, '0');
 }

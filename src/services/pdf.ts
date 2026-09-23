@@ -135,31 +135,59 @@ function resolveMessrsLines(buyer: PartySnap): { company: string; personLine: st
   return { company, personLine: null };
 }
 
-/** Prefer single-file TTF/OTF — PDFKit does not render CJK .ttc reliably (mojibake). */
+/** Prefer single-file TTF/OTF — PDFKit does not render CJK .ttc reliably (mojibake).
+ *  Always prefer a CJK-capable face first: site payment/remarks text may be Korean
+ *  even when the PDF locale is English (labels in EN + body from site master). */
 function resolveFont(locale: Locale): string | null {
+  const appFonts = path.resolve(process.cwd(), 'fonts');
+  const cjk = [
+    path.join(appFonts, 'NotoSansKR-Regular.otf'),
+    path.join(appFonts, 'NotoSansJP-Regular.otf'),
+    path.join(appFonts, 'NotoSansSC-Regular.otf'),
+    '/opt/invoice-service/fonts/NotoSansKR-Regular.otf',
+    '/opt/invoice-service/fonts/NotoSansJP-Regular.otf',
+    '/opt/invoice-service/fonts/NotoSansSC-Regular.otf',
+    '/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf',
+    '/usr/share/fonts/opentype/noto/NotoSansKR-Regular.otf',
+    '/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf',
+    '/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf',
+    '/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf',
+    '/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf',
+  ];
   const byLocale: Record<Locale, string[]> = {
     en: [
+      ...cjk,
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
       '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
     ],
     ko: [
+      path.join(appFonts, 'NotoSansKR-Regular.otf'),
+      '/opt/invoice-service/fonts/NotoSansKR-Regular.otf',
       '/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf',
       '/usr/share/fonts/opentype/noto/NotoSansKR-Regular.otf',
+      ...cjk,
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ],
     ja: [
+      path.join(appFonts, 'NotoSansJP-Regular.otf'),
+      '/opt/invoice-service/fonts/NotoSansJP-Regular.otf',
       '/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf',
       '/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf',
+      ...cjk,
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ],
     zh: [
+      path.join(appFonts, 'NotoSansSC-Regular.otf'),
+      '/opt/invoice-service/fonts/NotoSansSC-Regular.otf',
       '/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf',
       '/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf',
+      ...cjk,
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ],
     th: [
       '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf',
       '/usr/share/fonts/truetype/tlwg/Garuda.ttf',
+      ...cjk,
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     ],
   };
@@ -265,6 +293,34 @@ function cleanRemark(raw?: string | null, ticketNo?: string | null): string {
   if (s.startsWith('sim-') || s.startsWith('SIM-')) return '';
   if (s.length > 28) return `${s.slice(0, 26)}…`;
   return s;
+}
+
+/** Grayscale circular SAMPLE stamp for simulator PDFs (never real seals). */
+function drawSampleSeal(
+  doc: PDFKit.PDFDocument,
+  cx: number,
+  cy: number,
+  diameter: number,
+  label: string,
+): void {
+  const r = Math.max(22, diameter / 2);
+  doc.save();
+  // Absolute coords only — PDFKit rotate+custom-font text often draws off-canvas.
+  // Keep current Body font (Noto/CJK has Latin glyphs); do NOT switch to Helvetica
+  // or later CJK Terms/Remarks text becomes tofu boxes.
+  doc.fillColor('#f3f4f6').circle(cx, cy, r).fill();
+  doc.lineWidth(3).strokeColor('#374151');
+  doc.circle(cx, cy, r).stroke();
+  doc.lineWidth(1.4).strokeColor('#6b7280');
+  doc.circle(cx, cy, r - 5).stroke();
+  const fontSize = Math.max(10, Math.min(14, r * 0.48));
+  doc.fontSize(fontSize).fillColor('#111827');
+  const tw = doc.widthOfString(label);
+  doc.text(label, cx - tw / 2, cy - fontSize * 0.5, {
+    lineBreak: false,
+    width: Math.ceil(tw) + 4,
+  });
+  doc.restore();
 }
 
 function unitCell(line: LineItemInput): string {
@@ -452,7 +508,9 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     doc.fontSize(8).fillColor(COLORS.muted);
     doc.text(
       `${t(locale, 'pdf.termsOfPayment')} ${
-        input.termsOfPayment || t(locale, 'pdf.defaultPaymentTerms')
+        input.termsOfPayment ||
+        sitePdfEarly?.termsOfPayment ||
+        t(locale, 'pdf.defaultPaymentTerms')
       }`,
       { width: pageW },
     );
@@ -550,22 +608,22 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
         align: 'left' | 'right' | 'center';
         color?: string;
       }> = [
-        { text: String(line.item || ''), w: cols.item, align: 'left' },
-        { text: String(line.description || ''), w: cols.desc, align: 'left' },
+        { text: String(line.item || ''), w: cols.item, align: 'center' },
+        { text: String(line.description || ''), w: cols.desc, align: 'center' },
         {
           text: hidePrice ? '—' : money(line.unitPrice, input.currency),
           w: cols.price,
           align: 'right',
           color: hidePrice ? COLORS.muted : COLORS.amount,
         },
-        { text: unitCell(line), w: cols.unit, align: 'right' },
+        { text: unitCell(line), w: cols.unit, align: 'center' },
         {
           text: money(line.amount, input.currency),
           w: cols.amount,
           align: 'right',
           color: COLORS.amount,
         },
-        { text: String(line.remark || ''), w: cols.remark, align: 'left' },
+        { text: String(line.remark || ''), w: cols.remark, align: 'center' },
       ];
       const rowH = Math.max(...cellData.map((c) => measure(c.text, c.w)), minRowH);
       if (y + rowH > bottomLimit()) {
@@ -651,7 +709,15 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
 
     // Ticket / Tx meta — same font size & line gap as Remarks bank lines
     const memo = input.memo || '';
-    const isSimulator = /^\[SIMULATOR\]/i.test(memo);
+    const simTag = memo.match(/^\[SIMULATOR(?::([^\]]*))?\]/i);
+    const isSimulator = !!simTag;
+    const simFlags = String(simTag?.[1] || '').toLowerCase();
+    const watermarkOptOut = /\bnowm\b/.test(simFlags);
+    const sampleSealOptOut = /\bnosample\b/.test(simFlags);
+    const useSampleSeal =
+      isSimulator &&
+      !sampleSealOptOut &&
+      sitePdfEarly?.simulatorSampleSealEnabled !== false;
     const kindKey = isSimulator
       ? null // simulator: no "Type: Simulator" line — red watermark on signature instead
       : memo.startsWith('[SANDBOX]')
@@ -666,7 +732,7 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     const ticket =
       input.ticketNo && !String(input.ticketNo).startsWith('SIM-') ? String(input.ticketNo) : '';
     const note = memo
-      .replace(/^\[(SIMULATOR|SANDBOX)\]\s*/i, '')
+      .replace(/^\[(SIMULATOR|SANDBOX)(?::[^\]]*)?\]\s*/i, '')
       .replace(/\|\s*/g, ' ')
       .replace(/\b(network|feeMode)\s*:\s*\S+/gi, '')
       .replace(/\s{2,}/g, ' ')
@@ -782,7 +848,7 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     void personW;
 
     const tryImage = (filePath: string | null | undefined, x: number, yImg: number, w: number, h: number) => {
-      if (!filePath) return false;
+      if (!filePath || useSampleSeal) return false;
       try {
         doc.image(filePath, x, yImg, { width: w, height: h });
         return true;
@@ -794,7 +860,15 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     let drewAny = false;
     let blockBottom = nameY + namePadBelow;
 
-    if (mode === 'official_stamp' || mode === 'official') {
+    if (useSampleSeal) {
+      // Simulator SAMPLE mode: grayscale SAMPLE stamp instead of real seals
+      const sampleSize = 64;
+      const sampleCx = Math.max(leftX + sampleSize / 2, lastTokenX + lastTokenW * 0.5);
+      const sampleCy = nameMidY;
+      drawSampleSeal(doc, sampleCx, sampleCy, sampleSize, t(locale, 'pdf.sampleSeal'));
+      drewAny = true;
+      blockBottom = Math.max(blockBottom, sampleCy + sampleSize / 2 + 4);
+    } else if (mode === 'official_stamp' || mode === 'official') {
       // 회사직인(와이드형 이미지): Name 글자 중앙에 올려 노출
       const officialX = Math.max(leftX, lastTokenX + lastTokenW * 0.5 - officialW * 0.5);
       const officialY = nameMidY - officialH * 0.5;
@@ -848,8 +922,14 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     }
 
     // Simulator: red watermark overlapping signature block (no "Type: Simulator" meta line)
-    if (isSimulator) {
-      const wm = t(locale, 'pdf.simulatorWatermark');
+    const showSimulatorWm =
+      isSimulator &&
+      !watermarkOptOut &&
+      sitePdf?.simulatorWatermarkEnabled !== false;
+    if (showSimulatorWm) {
+      const wm =
+        String(sitePdf?.simulatorWatermarkText || '').trim() ||
+        t(locale, 'pdf.simulatorWatermark');
       doc.fontSize(10).fillColor('#dc2626');
       doc.text(wm, leftX, Math.max(nameY + 6, nameMidY + 4), {
         width: Math.min(pageW, 420),

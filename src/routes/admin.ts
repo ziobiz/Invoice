@@ -2,13 +2,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
-import { query } from '../db/pool.js';
+import { query, withTransaction } from '../db/pool.js';
 import { requireAdmin, requireHq } from '../middleware/auth.js';
 import { createApiKey, revokeApiKey } from '../services/apiKeys.js';
 import { config } from '../config.js';
 import { flagsFromSealMode, isSealAssetKind, resolveSealAbs, resolveSealDisplayMode, saveSealAsset } from '../services/seal.js';
 import { writeAudit } from '../services/crypto.js';
 import { assertSensitiveOtp } from './auth.js';
+import {
+  listMergedCandidates,
+  createMergedInvoice,
+  createMergedRevision,
+  getMergedDetail,
+  softDeleteMerged,
+  listMerged,
+  mergedPdfAbsPath,
+  type MergedMode,
+} from '../services/merged-invoice.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -57,7 +67,8 @@ adminRouter.get('/sites', async (_req, res, next) => {
 
 adminRouter.post('/sites', requireHq, async (req, res, next) => {
   try {
-    const { code, name, notes, active = true } = req.body;
+    const { code, name, notes, active = true, use_shared_parties = false } = req.body;
+    const defaultTermsOfPayment = 'T/T';
     const defaultTerms =
       'The above TOTAL amount must be deposited in full (The remittance fee is to be paid by the remitter)';
     const defaultDue = 'Please deposit by the due date';
@@ -65,15 +76,25 @@ adminRouter.post('/sites', requireHq, async (req, res, next) => {
       'Notice: This invoice is electronically generated and is valid without a physical signature or company seal.';
     const row = await query(
       `INSERT INTO sites (
-         code, name, notes, active,
-         pdf_payment_date_offset, pdf_payment_terms, pdf_payment_due,
+         code, name, notes, active, use_shared_parties,
+         pdf_payment_date_offset, pdf_terms_of_payment, pdf_payment_terms, pdf_payment_due,
          pdf_notice_slot, pdf_notice_a_name, pdf_notice_a_text,
          pdf_notice_b_name, pdf_notice_b_text,
          pdf_notice_c_name, pdf_notice_c_text,
          pdf_notice_text
-       ) VALUES ($1, $2, $3, $4, 3, $5, $6, 'off', 'Active A', $7, 'Active B', $7, 'Active C', $7, $7)
+       ) VALUES ($1, $2, $3, $4, $5, 3, $6, $7, $8, 'off', 'Active A', $9, 'Active B', $9, 'Active C', $9, $9)
        RETURNING *`,
-      [String(code).toLowerCase(), name, notes ?? null, !!active, defaultTerms, defaultDue, defaultNotice],
+      [
+        String(code).toLowerCase(),
+        name,
+        notes ?? null,
+        !!active,
+        !!use_shared_parties,
+        defaultTermsOfPayment,
+        defaultTerms,
+        defaultDue,
+        defaultNotice,
+      ],
     );
     await logAdmin(req, 'site.created', {
       siteId: row.rows[0].id,
@@ -197,6 +218,15 @@ adminRouter.patch('/sites/:id', requireHq, async (req, res, next) => {
          pdf_line_c_description = COALESCE($57, pdf_line_c_description),
          pdf_line_c_unit_label = COALESCE($58, pdf_line_c_unit_label),
          pdf_line_c_hide_unit_price = COALESCE($59, pdf_line_c_hide_unit_price),
+         pdf_simulator_watermark_enabled = COALESCE($60, pdf_simulator_watermark_enabled),
+         pdf_simulator_watermark_text = COALESCE($61, pdf_simulator_watermark_text),
+         pdf_terms_of_payment = COALESCE($62, pdf_terms_of_payment),
+         pdf_simulator_sample_seal_enabled = COALESCE($63, pdf_simulator_sample_seal_enabled),
+         invoice_retention_days = CASE
+           WHEN $64::boolean THEN $65::int
+           ELSE invoice_retention_days
+         END,
+         use_shared_parties = COALESCE($66, use_shared_parties),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
@@ -262,6 +292,26 @@ adminRouter.patch('/sites/:id', requireHq, async (req, res, next) => {
         str('pdf_line_c_description'),
         b.pdf_line_c_unit_label !== undefined ? String(b.pdf_line_c_unit_label) : null,
         typeof b.pdf_line_c_hide_unit_price === 'boolean' ? b.pdf_line_c_hide_unit_price : null,
+        typeof b.pdf_simulator_watermark_enabled === 'boolean'
+          ? b.pdf_simulator_watermark_enabled
+          : null,
+        b.pdf_simulator_watermark_text !== undefined
+          ? String(b.pdf_simulator_watermark_text)
+          : null,
+        b.pdf_terms_of_payment !== undefined ? String(b.pdf_terms_of_payment) : null,
+        typeof b.pdf_simulator_sample_seal_enabled === 'boolean'
+          ? b.pdf_simulator_sample_seal_enabled
+          : null,
+        Object.prototype.hasOwnProperty.call(b, 'invoice_retention_days'),
+        (() => {
+          if (!Object.prototype.hasOwnProperty.call(b, 'invoice_retention_days')) return null;
+          const raw = b.invoice_retention_days;
+          if (raw === null || raw === '' || raw === false) return null;
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n <= 0) return null;
+          return Math.max(1, Math.min(30, Math.floor(n)));
+        })(),
+        typeof b.use_shared_parties === 'boolean' ? b.use_shared_parties : null,
       ],
     );
     if (!row.rowCount) {
@@ -283,15 +333,34 @@ adminRouter.patch('/sites/:id', requireHq, async (req, res, next) => {
 
 adminRouter.delete('/sites/:id', requireHq, async (req, res, next) => {
   try {
+    const siteId = String(req.params.id || '').trim();
     const inv = await query<{ c: number }>(
       `SELECT COUNT(*)::int AS c FROM invoices WHERE site_id = $1`,
-      [req.params.id],
+      [siteId],
     );
     if ((inv.rows[0]?.c ?? 0) > 0) {
       res.status(409).json({ error: 'sites.deleteHasInvoices', errorKey: 'sites.deleteHasInvoices' });
       return;
     }
-    const row = await query(`DELETE FROM sites WHERE id = $1 RETURNING id, code`, [req.params.id]);
+    const merged = await query<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM merged_invoices WHERE site_id = $1`,
+      [siteId],
+    );
+    if ((merged.rows[0]?.c ?? 0) > 0) {
+      res.status(409).json({ error: 'sites.deleteHasMerged', errorKey: 'sites.deleteHasMerged' });
+      return;
+    }
+
+    const row = await withTransaction(async (client) => {
+      // audit_logs.site_id has NO ACTION — clear before site delete
+      await client.query(`UPDATE audit_logs SET site_id = NULL WHERE site_id = $1`, [siteId]);
+      const del = await client.query<{ id: string; code: string }>(
+        `DELETE FROM sites WHERE id = $1 RETURNING id, code`,
+        [siteId],
+      );
+      return del;
+    });
+
     if (!row.rowCount) {
       res.status(404).json({ error: 'Not found' });
       return;
@@ -496,7 +565,8 @@ adminRouter.get('/parties', async (req, res, next) => {
        FROM parties p
        LEFT JOIN sites s ON s.id = p.site_id
        WHERE ($1::text IS NULL OR s.code = $1 OR p.site_id::text = $1)
-         AND ($2::text IS NULL OR p.kind = $2 OR ($2 = 'seller' AND p.kind = 'both') OR ($2 = 'buyer' AND p.kind = 'both'))
+         AND ($2::text IS NULL OR p.kind = $2 OR ($2 = 'seller' AND p.kind = 'both') OR ($2 = 'buyer' AND p.kind = 'both')
+              OR (($2 = 'seller' OR $2 = 'buyer') AND p.is_shared = TRUE))
        ORDER BY s.code NULLS LAST, p.kind, p.code`,
       [site, kind],
     );
@@ -531,9 +601,9 @@ adminRouter.post('/parties', requireHq, async (req, res, next) => {
     const row = await query(
       `INSERT INTO parties (
          site_id, code, kind, legal_name, trade_name, country, address, tax_id,
-         email, phone, website, bank_info, signatory_name, signatory_title, extra_json, active
+         email, phone, website, bank_info, signatory_name, signatory_title, extra_json, active, is_shared
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17) RETURNING *`,
       [
         siteId,
         b.code,
@@ -551,6 +621,7 @@ adminRouter.post('/parties', requireHq, async (req, res, next) => {
         b.signatory_title !== undefined ? String(b.signatory_title || '').trim() : null,
         JSON.stringify(b.extra_json ?? {}),
         b.active !== false,
+        b.is_shared === true,
       ],
     );
     await logAdmin(req, 'party.created', {
@@ -589,6 +660,7 @@ adminRouter.patch('/parties/:id', requireHq, async (req, res, next) => {
          signatory_name = COALESCE($13, signatory_name),
          signatory_title = COALESCE($14, signatory_title),
          active = COALESCE($15, active),
+         is_shared = COALESCE($16, is_shared),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
@@ -607,6 +679,7 @@ adminRouter.patch('/parties/:id', requireHq, async (req, res, next) => {
         b.signatory_name !== undefined ? String(b.signatory_name || '').trim() : null,
         b.signatory_title !== undefined ? String(b.signatory_title || '').trim() : null,
         typeof b.active === 'boolean' ? b.active : null,
+        typeof b.is_shared === 'boolean' ? b.is_shared : null,
       ],
     );
     if (!row.rowCount) {
@@ -772,6 +845,43 @@ adminRouter.get('/mappings', async (_req, res, next) => {
 adminRouter.put('/mappings/:siteId', requireHq, async (req, res, next) => {
   try {
     const { seller_party_id, buyer_party_id, product_id, active = true } = req.body;
+    const siteId = req.params.siteId;
+    if (!seller_party_id || !buyer_party_id || !product_id) {
+      res.status(400).json({ error: 'mappings.required', errorKey: 'mappings.required' });
+      return;
+    }
+    if (String(seller_party_id) === String(buyer_party_id)) {
+      res.status(400).json({ error: 'mappings.sameParty', errorKey: 'mappings.sameParty' });
+      return;
+    }
+
+    const siteRow = await query(`SELECT id FROM sites WHERE id = $1`, [siteId]);
+    if (!siteRow.rowCount) {
+      res.status(404).json({ error: 'mappings.siteNotFound', errorKey: 'mappings.siteNotFound' });
+      return;
+    }
+
+    const parties = await query(
+      `SELECT id, site_id, is_shared, kind FROM parties WHERE id = ANY($1::uuid[])`,
+      [[seller_party_id, buyer_party_id]],
+    );
+    if (parties.rowCount !== 2) {
+      res.status(400).json({ error: 'mappings.partyNotFound', errorKey: 'mappings.partyNotFound' });
+      return;
+    }
+    for (const p of parties.rows) {
+      const sameSite = String(p.site_id) === String(siteId);
+      // Shared parties may be used by any site mapping (site-agnostic)
+      const sharedOk = p.is_shared === true;
+      if (!sameSite && !sharedOk) {
+        res.status(400).json({
+          error: 'mappings.partyNotAllowed',
+          errorKey: 'mappings.partyNotAllowed',
+        });
+        return;
+      }
+    }
+
     const row = await query(
       `INSERT INTO site_mappings (site_id, seller_party_id, buyer_party_id, product_id, active)
        VALUES ($1,$2,$3,$4,$5)
@@ -782,10 +892,10 @@ adminRouter.put('/mappings/:siteId', requireHq, async (req, res, next) => {
          active = EXCLUDED.active,
          updated_at = NOW()
        RETURNING *`,
-      [req.params.siteId, seller_party_id, buyer_party_id, product_id, !!active],
+      [siteId, seller_party_id, buyer_party_id, product_id, !!active],
     );
     await logAdmin(req, 'mapping.saved', {
-      siteId: req.params.siteId,
+      siteId,
       detail: { seller_party_id, buyer_party_id, product_id, active: !!active },
     });
     res.json({ mapping: row.rows[0] });
@@ -817,8 +927,12 @@ adminRouter.delete('/mappings/:siteId', requireHq, async (req, res, next) => {
 // ---------- Invoices (admin) ----------
 adminRouter.get('/invoices', async (req, res, next) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
-    const offset = Number(req.query.offset) || 0;
+    const rawLimit = String(req.query.limit || '50').toLowerCase();
+    const wantAll = rawLimit === 'all';
+    const limit = wantAll
+      ? 20000
+      : Math.min(Math.max(Number(rawLimit) || 50, 1), 1000);
+    const offset = wantAll ? 0 : Math.max(0, Number(req.query.offset) || 0);
     const site = req.query.site ? String(req.query.site).trim() : null;
     const from = req.query.from ? String(req.query.from).trim() : null;
     const to = req.query.to ? String(req.query.to).trim() : null;
@@ -861,23 +975,7 @@ adminRouter.get('/invoices', async (req, res, next) => {
       statusQ = hit ? hit[0] : lower;
     }
 
-    const rows = await query(
-      `SELECT i.*, s.code AS site_code,
-              COALESCE(i.buyer_snapshot->>'code', '') AS buyer_code,
-              COALESCE(i.seller_snapshot->>'code', '') AS seller_code,
-              COALESCE(i.buyer_snapshot->>'legal_name', i.buyer_snapshot->>'trade_name', '') AS buyer_name,
-              la.alias AS last_actor_alias,
-              la.email AS last_actor_email,
-              la.name AS last_actor_name,
-              CASE
-                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%' THEN 'simulator'
-                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%' THEN 'sandbox'
-                ELSE 'live'
-              END AS invoice_kind
-       FROM invoices i
-       JOIN sites s ON s.id = i.site_id
-       LEFT JOIN admins la ON la.id = i.last_actor_id
-       WHERE ($1::text IS NULL OR s.code = $1 OR s.name ILIKE '%' || $1 || '%')
+    const filterSql = `WHERE ($1::text IS NULL OR s.code = $1 OR s.name ILIKE '%' || $1 || '%')
          AND ($3::text IS NULL OR i.issued_at >= $3::date)
          AND ($4::text IS NULL OR i.issued_at < ($4::date + interval '1 day'))
          AND (
@@ -929,10 +1027,32 @@ adminRouter.get('/invoices', async (req, res, next) => {
                OR COALESCE(i.buyer_snapshot->>'code','') ILIKE '%' || $5 || '%'
              )
            )
-         )
+         )`;
+    const filterParams = [site, kind, from, to, q, qField, statusQ];
+    const count = await query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c FROM invoices i JOIN sites s ON s.id = i.site_id ${filterSql}`,
+      filterParams,
+    );
+    const rows = await query(
+      `SELECT i.*, s.code AS site_code,
+              COALESCE(i.buyer_snapshot->>'code', '') AS buyer_code,
+              COALESCE(i.seller_snapshot->>'code', '') AS seller_code,
+              COALESCE(i.buyer_snapshot->>'legal_name', i.buyer_snapshot->>'trade_name', '') AS buyer_name,
+              la.alias AS last_actor_alias,
+              la.email AS last_actor_email,
+              la.name AS last_actor_name,
+              CASE
+                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%' THEN 'simulator'
+                WHEN i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%' THEN 'sandbox'
+                ELSE 'live'
+              END AS invoice_kind
+       FROM invoices i
+       JOIN sites s ON s.id = i.site_id
+       LEFT JOIN admins la ON la.id = i.last_actor_id
+       ${filterSql}
        ORDER BY i.issued_at DESC
        LIMIT $8 OFFSET $9`,
-      [site, kind, from, to, q, qField, statusQ, limit, offset],
+      [...filterParams, limit, offset],
     );
     res.json({
       items: rows.rows.map((r) => ({
@@ -941,6 +1061,9 @@ adminRouter.get('/invoices', async (req, res, next) => {
         is_sandbox: r.invoice_kind === 'sandbox',
         is_simulator: r.invoice_kind === 'simulator',
       })),
+      total: Number(count.rows[0]?.c || 0),
+      limit,
+      offset,
       kind,
       qField,
       q,
@@ -1260,6 +1383,192 @@ adminRouter.get('/audit/export', async (req, res, next) => {
     }
     res.json({ items: rows.rows });
   } catch (e) {
+    next(e);
+  }
+});
+
+// ---------- Merged invoices (인보이스통합) ----------
+adminRouter.get('/merged/candidates', async (req, res, next) => {
+  try {
+    const siteId = String(req.query.siteId || req.query.site || '').trim();
+    const from = String(req.query.from || req.query.date || '').trim();
+    const to = String(req.query.to || req.query.date || '').trim();
+    const sellerCode = String(req.query.sellerCode || req.query.seller || '').trim();
+    const buyerCode = String(req.query.buyerCode || req.query.buyer || '').trim();
+    if (!from || !to) {
+      res.status(400).json({ error: 'merged.candidatesRequired', errorKey: 'merged.candidatesRequired' });
+      return;
+    }
+    const data = await listMergedCandidates({
+      siteId: siteId || null,
+      from,
+      to,
+      sellerCode: sellerCode || null,
+      buyerCode: buyerCode || null,
+    });
+    res.json(data);
+  } catch (e) {
+    const err = e as { status?: number; errorKey?: string; message?: string };
+    if (err.status) {
+      res.status(err.status).json({ error: err.message, errorKey: err.errorKey || err.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+adminRouter.get('/merged', async (req, res, next) => {
+  try {
+    const data = await listMerged({
+      site: req.query.site ? String(req.query.site) : null,
+      from: req.query.from ? String(req.query.from) : null,
+      to: req.query.to ? String(req.query.to) : null,
+      q: req.query.q ? String(req.query.q) : null,
+      includeDeleted: String(req.query.includeDeleted || '') === '1',
+    });
+    res.json(data);
+  } catch (e) {
+    next(e);
+  }
+});
+
+adminRouter.get('/merged/:id', async (req, res, next) => {
+  try {
+    const detail = await getMergedDetail(String(req.params.id));
+    if (!detail) {
+      res.status(404).json({ error: 'merged.notFound', errorKey: 'merged.notFound' });
+      return;
+    }
+    res.json(detail);
+  } catch (e) {
+    next(e);
+  }
+});
+
+adminRouter.get('/merged/:id/pdf', async (req, res, next) => {
+  try {
+    const detail = await getMergedDetail(String(req.params.id));
+    if (!detail) {
+      res.status(404).json({ error: 'merged.notFound', errorKey: 'merged.notFound' });
+      return;
+    }
+    const abs = mergedPdfAbsPath(detail.merged.pdf_path);
+    if (!abs || !fs.existsSync(abs)) {
+      res.status(404).json({ error: 'merged.pdfMissing', errorKey: 'merged.pdfMissing' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(detail.merged.invoice_no)}.pdf"`,
+    );
+    fs.createReadStream(abs).pipe(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+adminRouter.post('/merged', requireHq, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const siteId = String(b.siteId || b.site_id || '').trim();
+    const from = String(b.from || b.date || '').trim() || null;
+    const to = String(b.to || b.date || '').trim() || null;
+    const sourceIds = Array.isArray(b.sourceIds)
+      ? b.sourceIds.map(String)
+      : Array.isArray(b.source_ids)
+        ? b.source_ids.map(String)
+        : [];
+    const mode: MergedMode = b.mode === 'total' ? 'total' : 'lines';
+    const result = await createMergedInvoice({
+      siteId,
+      from,
+      to,
+      sourceIds,
+      mode,
+      actorId: req.session?.adminId || null,
+    });
+    await logAdmin(req, 'merged.created', {
+      siteId,
+      detail: {
+        invoiceNo: result.merged.invoice_no,
+        mode,
+        sourceIds,
+        from,
+        to,
+        amount: result.merged.amount,
+      },
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    const err = e as { status?: number; errorKey?: string; message?: string };
+    if (err.status) {
+      res.status(err.status).json({ error: err.message, errorKey: err.errorKey || err.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+adminRouter.post('/merged/:id/revisions', requireHq, async (req, res, next) => {
+  try {
+    if (!(await assertSensitiveOtp(req, res))) return;
+    const b = req.body || {};
+    const items = Array.isArray(b.items) ? b.items : [];
+    const result = await createMergedRevision({
+      fromId: String(req.params.id),
+      actorId: req.session?.adminId || null,
+      currency: b.currency,
+      amount: b.amount,
+      mode: b.mode,
+      seller_snapshot: b.seller_snapshot,
+      buyer_snapshot: b.buyer_snapshot,
+      product_snapshot: b.product_snapshot,
+      memo: b.memo,
+      ticket_no: b.ticket_no,
+      asset: b.asset,
+      asset_amount: b.asset_amount,
+      buyer_ref: b.buyer_ref,
+      issued_at: b.issued_at,
+      items,
+    });
+    await logAdmin(req, 'merged.revision', {
+      siteId: result.merged.site_id,
+      detail: {
+        fromId: req.params.id,
+        invoiceNo: result.merged.invoice_no,
+        revisionNo: result.merged.revision_no,
+      },
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    const err = e as { status?: number; errorKey?: string; message?: string };
+    if (err.status) {
+      res.status(err.status).json({ error: err.message, errorKey: err.errorKey || err.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+adminRouter.delete('/merged/:id', requireHq, async (req, res, next) => {
+  try {
+    const row = await softDeleteMerged(String(req.params.id), req.session?.adminId || null);
+    await logAdmin(req, 'merged.deleted', {
+      siteId: row.site_id,
+      detail: {
+        invoiceNo: row.invoice_no,
+        revisionNo: row.revision_no,
+        kind: Number(row.revision_no) === 1 ? 'original' : 'revision',
+      },
+    });
+    res.json({ merged: row });
+  } catch (e) {
+    const err = e as { status?: number; errorKey?: string; message?: string };
+    if (err.status) {
+      res.status(err.status).json({ error: err.message, errorKey: err.errorKey || err.message });
+      return;
+    }
     next(e);
   }
 });

@@ -21,6 +21,14 @@ async function migrate() {
     'schema_invoice_created_by_api.sql',
     'schema_invoice_content_edited.sql',
     'schema_reissue_actor_backfill.sql',
+    'schema_simulator_watermark.sql',
+    'schema_terms_of_payment.sql',
+    'schema_simulator_sample_seal.sql',
+    'schema_tinpass_sim_retention.sql',
+    'schema_shared_parties.sql',
+    'schema_pdf_phrases_english.sql',
+    'schema_merged_invoices.sql',
+    'schema_clear_false_pdf_regen.sql',
   ]) {
     const schemaPath = path.join(__dirname, file);
     const sql = fs.readFileSync(schemaPath, 'utf8');

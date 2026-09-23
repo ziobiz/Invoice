@@ -107,12 +107,20 @@ async function resolveParties(
   let buyerId = mapping.rows[0].buyer_party_id;
   let productId = mapping.rows[0].product_id;
 
-  if (body.sellerEntityCode) {
-    const r = await client.query<{ id: string }>(
-      `SELECT id FROM parties WHERE code = $1 AND active = TRUE AND (site_id = $2 OR site_id IS NULL)
-       ORDER BY CASE WHEN site_id = $2 THEN 0 ELSE 1 END LIMIT 1`,
-      [body.sellerEntityCode, siteId],
+  const partyByCode = async (code: string) => {
+    // Prefer same-site party; otherwise any active shared party with that code
+    return client.query<{ id: string }>(
+      `SELECT id FROM parties
+       WHERE code = $1 AND active = TRUE
+         AND (site_id = $2 OR site_id IS NULL OR is_shared = TRUE)
+       ORDER BY CASE WHEN site_id = $2 THEN 0 WHEN is_shared THEN 1 ELSE 2 END
+       LIMIT 1`,
+      [code, siteId],
     );
+  };
+
+  if (body.sellerEntityCode) {
+    const r = await partyByCode(body.sellerEntityCode);
     if (!r.rowCount) {
       throw Object.assign(new Error('api.error.sellerNotFound'), {
         status: 422,
@@ -122,11 +130,7 @@ async function resolveParties(
     sellerId = r.rows[0].id;
   }
   if (body.buyerEntityCode) {
-    const r = await client.query<{ id: string }>(
-      `SELECT id FROM parties WHERE code = $1 AND active = TRUE AND (site_id = $2 OR site_id IS NULL)
-       ORDER BY CASE WHEN site_id = $2 THEN 0 ELSE 1 END LIMIT 1`,
-      [body.buyerEntityCode, siteId],
-    );
+    const r = await partyByCode(body.buyerEntityCode);
     if (!r.rowCount) {
       throw Object.assign(new Error('api.error.buyerNotFound'), {
         status: 422,
@@ -147,6 +151,13 @@ async function resolveParties(
       });
     }
     productId = r.rows[0].id;
+  }
+
+  if (String(sellerId) === String(buyerId)) {
+    throw Object.assign(new Error('mappings.sameParty'), {
+      status: 422,
+      errorKey: 'mappings.sameParty',
+    });
   }
 
   const seller = (

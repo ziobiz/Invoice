@@ -78,6 +78,9 @@ export type SiteSealRow = {
   seal_use_stamp?: boolean | null;
   seal_use_signature?: boolean | null;
   pdf_payment_date_offset?: number | null;
+  /** Header line: "Terms of Payment : …" */
+  pdf_terms_of_payment?: string | null;
+  /** Payment block "Terms" body text */
   pdf_payment_terms?: string | null;
   pdf_payment_due?: string | null;
   pdf_remarks_notice?: string | null;
@@ -144,6 +147,9 @@ export type SiteSealRow = {
   pdf_line_c_description?: string | null;
   pdf_line_c_unit_label?: string | null;
   pdf_line_c_hide_unit_price?: boolean | null;
+  pdf_simulator_watermark_enabled?: boolean | null;
+  pdf_simulator_watermark_text?: string | null;
+  pdf_simulator_sample_seal_enabled?: boolean | null;
 };
 
 export type NoticeSlot = 'off' | 'a' | 'b' | 'c';
@@ -152,6 +158,9 @@ export type LineSlot = NoticeSlot;
 /** Site-level Payment / Remarks / Notice / Line defaults for PDF */
 export type SitePdfDefaults = {
   paymentDateOffset: number;
+  /** Header: Terms of Payment value (e.g. T/T) */
+  termsOfPayment: string | null;
+  /** Payment section Terms body */
   paymentTerms: string | null;
   paymentDue: string | null;
   remarksNotice: string | null;
@@ -176,6 +185,12 @@ export type SitePdfDefaults = {
   /** Unit text only; empty string = quantity number alone; null when slot off */
   lineUnitLabel: string | null;
   lineHideUnitPrice: boolean;
+  /** Simulator PDF red disclaimer — off hides watermark even for [SIMULATOR] invoices */
+  simulatorWatermarkEnabled: boolean;
+  /** Optional override; empty → i18n pdf.simulatorWatermark */
+  simulatorWatermarkText: string | null;
+  /** Simulator SAMPLE stamp — off uses real seals (formal look). Default linked to watermark in admin UI. */
+  simulatorSampleSealEnabled: boolean;
 };
 
 function resolveNoticeSlot(raw?: string | null, legacyEnabled?: boolean | null): NoticeSlot {
@@ -244,6 +259,7 @@ export function pdfDefaultsFromSite(site: SiteSealRow | null | undefined): SiteP
 
   return {
     paymentDateOffset: Number.isFinite(offset) && offset >= 0 ? Math.min(offset, 365) : 3,
+    termsOfPayment: trimOrNull(site?.pdf_terms_of_payment),
     paymentTerms: trimOrNull(site?.pdf_payment_terms),
     paymentDue: trimOrNull(site?.pdf_payment_due),
     remarksNotice: trimOrNull(site?.pdf_remarks_notice),
@@ -265,6 +281,9 @@ export function pdfDefaultsFromSite(site: SiteSealRow | null | undefined): SiteP
     lineDescription: lineActive?.description || null,
     lineUnitLabel: lineActive ? (lineActive.unitLabel ?? '') : null,
     lineHideUnitPrice: lineActive?.hideUnitPrice === true,
+    simulatorWatermarkEnabled: site?.pdf_simulator_watermark_enabled !== false,
+    simulatorWatermarkText: trimOrNull(site?.pdf_simulator_watermark_text),
+    simulatorSampleSealEnabled: site?.pdf_simulator_sample_seal_enabled !== false,
   };
 }
 

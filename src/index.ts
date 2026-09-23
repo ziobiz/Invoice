@@ -16,6 +16,7 @@ import { brandingRouter } from './routes/branding.js';
 import { verifyRouter } from './routes/verify.js';
 import { buildAdminHtml } from './services/branding.js';
 import { t, SUPPORTED_LOCALES } from './i18n/index.js';
+import { startInvoiceRetentionScheduler } from './services/retention.js';
 
 fs.mkdirSync(config.pdfStorageDir, { recursive: true });
 fs.mkdirSync(path.resolve(process.env.UPLOAD_DIR ?? './uploads', 'branding'), { recursive: true });
@@ -132,4 +133,5 @@ app.use(
 
 app.listen(config.port, () => {
   console.log(`Invoice Service listening on :${config.port}`);
+  startInvoiceRetentionScheduler();
 });

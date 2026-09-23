@@ -36,6 +36,7 @@ async function refreshInvoicePdf(
   inv: Record<string, unknown>,
   locale: import('../i18n/index.js').Locale,
   actorId?: string | null,
+  opts?: { markRegenerated?: boolean },
 ) {
   const site = await query<SiteSealRow>(
     `SELECT * FROM sites WHERE id = $1`,
@@ -110,10 +111,15 @@ async function refreshInvoicePdf(
     verifyUrl: verifyUrlFor(verifyToken),
   });
   await query(
-    `UPDATE invoices SET pdf_path = $2, pdf_hash = $3, pdf_regenerated_at = NOW(), updated_at = NOW(),
-       last_actor_id = COALESCE($4::uuid, last_actor_id)
-     WHERE id = $1`,
-    [inv.id, pdf.relativePath, pdf.pdfHash, actorId ?? null],
+    opts?.markRegenerated
+      ? `UPDATE invoices SET pdf_path = $2, pdf_hash = $3, pdf_regenerated_at = NOW(), updated_at = NOW(),
+           last_actor_id = COALESCE($4::uuid, last_actor_id)
+         WHERE id = $1`
+      : `UPDATE invoices SET pdf_path = $2, pdf_hash = $3, updated_at = NOW()
+         WHERE id = $1`,
+    opts?.markRegenerated
+      ? [inv.id, pdf.relativePath, pdf.pdfHash, actorId ?? null]
+      : [inv.id, pdf.relativePath, pdf.pdfHash],
   );
   return pdf;
 }
@@ -316,7 +322,9 @@ invoicesRouter.post('/admin/api/invoices/:id/regenerate-pdf', requireAdmin, asyn
       return;
     }
     const locale = resolvePdfLocale(String(req.query.pdfLang || req.body?.pdfLang || req.body?.lang || 'en'));
-    const pdf = await refreshInvoicePdf(row.rows[0], locale, req.session.adminId);
+    const pdf = await refreshInvoicePdf(row.rows[0], locale, req.session.adminId, {
+      markRegenerated: true,
+    });
     await writeAudit({
       eventType: 'invoice.pdf.regenerated',
       actorType: 'admin',

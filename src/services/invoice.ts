@@ -61,8 +61,9 @@ function lineRemark(
   const fromProduct = String(productRemark || '').trim();
   if (fromProduct) return fromProduct;
   const ticket = String(ticketNo || '').trim();
-  if (ticket && !ticket.startsWith('SIM-')) return ticket;
-  return '';
+  if (!ticket || ticket.startsWith('SIM-') || ticket.startsWith('sim-')) return '';
+  // Fallback: ticket without leading USDT- (PDF also strips via cleanRemark)
+  return ticket.replace(/^USDT[-_\s]*/i, '');
 }
 
 function partySnap(p: PartyRow) {

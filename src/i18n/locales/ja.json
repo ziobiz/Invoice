@@ -239,7 +239,7 @@
   "sites.pdfNoticeBankAdd": "Bank Add",
   "sites.pdfNoticeSwift": "Swift Code",
   "sites.pdfLine": "4. 品目文言",
-  "sites.pdfLineHint": "プリセット3つで Item・Description・Unit の文字（数字以外）を差し替えます。無効時は元の商品値のまま。Unit文字を空にすると数量数字のみ。Unit Price非表示時は Unit Price・Unit が —、Amount はそのまま出ます。",
+  "sites.pdfLineHint": "「品目文言の表示」で活性A/B/Cを選び、Item・Description・Unit文字(数字以外)を入力します。オフ時は元の商品値が使われます。",
   "sites.pdfLineSlot": "品目文言の表示",
   "sites.lineOff": "無効",
   "sites.lineActiveA": "有効 A",
@@ -787,5 +787,7 @@
   "merged.selectAllOneGroup": "同一通貨・発注/供給コードのグループのみ選択しました。他グループは除外されます。",
   "merged.preview": "プレビュー",
   "merged.edit": "編集",
-  "merged.deletedReadonly": "削除済み文書は閲覧のみで編集できません。"
+  "merged.deletedReadonly": "削除済み文書は閲覧のみで編集できません。",
+  "sites.pdfLineSlotHint": "「品目文言の表示」をオフ以外の活性A(またはB/C)にすると Item・Unit文字・Description 入力欄が出ます。Unit文字に F/SET を入れてください。",
+  "sites.pdfLineActiveFields": "選択中: {name} — 下の値がPDF品目に適用されます"
 }

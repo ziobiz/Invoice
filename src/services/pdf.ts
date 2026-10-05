@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import { config } from '../config.js';
 import { t, type Locale, DEFAULT_LOCALE, resolveLocale } from '../i18n/index.js';
 import type { SiteSealConfig, SitePdfDefaults } from './seal.js';
+import { toPublicInvoiceNo } from './invoice-brand.js';
 
 export type PartySnap = {
   code: string;
@@ -285,14 +286,26 @@ function qty(n: string | number): string {
   });
 }
 
+/** Ticket fallback for Remark: drop leading USDT- / USDT so "USDT-20261005-4589" → "20261005-4589". */
+function ticketRemarkLabel(ticketNo?: string | null): string {
+  const ticket = String(ticketNo || '').trim();
+  if (!ticket || ticket.startsWith('SIM-') || ticket.startsWith('sim-')) return '';
+  return ticket.replace(/^USDT[-_\s]*/i, '');
+}
+
+/**
+ * Prefer product/line remark (e.g. FULL FUNCTION).
+ * Only fall back to ticket number (without USDT- prefix) when remark is empty
+ * or is literally the raw ticket number.
+ */
 function cleanRemark(raw?: string | null, ticketNo?: string | null): string {
   const ticket = String(ticketNo || '').trim();
-  if (ticket && !ticket.startsWith('SIM-')) return ticket;
   const s = String(raw || '').trim();
-  if (!s) return '';
-  if (s.startsWith('sim-') || s.startsWith('SIM-')) return '';
-  if (s.length > 28) return `${s.slice(0, 26)}…`;
-  return s;
+  if (s && !s.startsWith('sim-') && !s.startsWith('SIM-') && s !== ticket) {
+    if (s.length > 28) return `${s.slice(0, 26)}…`;
+    return s;
+  }
+  return ticketRemarkLabel(ticketNo);
 }
 
 /** Grayscale circular SAMPLE stamp for simulator PDFs (never real seals). */
@@ -323,13 +336,20 @@ function drawSampleSeal(
   doc.restore();
 }
 
+function isCryptoAssetUnit(unit: string | null | undefined): boolean {
+  return /^(USDT|USDC|BTC|ETH|TRX|BNB|XRP|SOL)$/i.test(String(unit || '').trim());
+}
+
 function unitCell(line: LineItemInput): string {
   if (line.hideUnitPrice) return '—';
-  const q = qty(line.quantity);
+  // Bank remittance PDF: never show crypto ticker/amount in Unit (e.g. "23169 USDT")
+  const crypto = isCryptoAssetUnit(line.unit);
+  const q = crypto ? '1' : qty(line.quantity);
   if (line.unitLabel !== undefined && line.unitLabel !== null) {
     const label = String(line.unitLabel).trim();
     return label ? `${q} ${label}` : q;
   }
+  if (crypto) return q;
   const u = String(line.unit || '').trim();
   if (u && u !== 'EA' && !/^\d/.test(u)) return `${q} ${u}`;
   return q;
@@ -362,7 +382,9 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
   const year = String(input.issuedAt.getUTCFullYear());
   const dir = path.join(config.pdfStorageDir, year, input.sourceSite);
   ensureDir(dir);
-  const fileName = `${input.invoiceNo}.pdf`;
+  // Public brand on disk + inside PDF (never TINPASS)
+  const publicInvoiceNo = toPublicInvoiceNo(input.invoiceNo);
+  const fileName = `${publicInvoiceNo}.pdf`;
   const absPath = path.join(dir, fileName);
   const relativePath = path.relative(config.pdfStorageDir, absPath);
   const fontPath = resolveFont(locale);
@@ -463,7 +485,7 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
       width: leftMetaW,
       lineBreak: false,
     });
-    doc.fillColor(COLORS.seller).text(`${t(locale, 'pdf.piNo')} ${input.invoiceNo}`, rightX, metaY, {
+    doc.fillColor(COLORS.seller).text(`${t(locale, 'pdf.piNo')} ${publicInvoiceNo}`, rightX, metaY, {
       width: rightMetaW,
       align: 'right',
       lineBreak: false,

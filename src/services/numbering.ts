@@ -1,9 +1,10 @@
 import type { PoolClient } from 'pg';
+import { invoiceNumberPrefix } from './invoice-brand.js';
 
 /**
  * Invoice number assumption (documented in README):
- *   {SITECODE}-{YYYY}-{NNNNNN}
- * Example: TINPASS-2026-000001
+ *   {PREFIX}-{YYYY}-{NNNNNN}
+ * Example: TPDM-2026-000001 (site code tinpass → public prefix TPDM)
  * Sequence is per site + calendar year (Asia/Seoul unless overridden by DB NOW() year).
  */
 export async function nextInvoiceNo(
@@ -21,13 +22,13 @@ export async function nextInvoiceNo(
     [siteId, year],
   );
   const seq = upsert.rows[0].last_seq;
-  const code = siteCode.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'SITE';
+  const code = invoiceNumberPrefix(siteCode);
   return `${code}-${year}-${String(seq).padStart(6, '0')}`;
 }
 
 /**
- * Merged invoice number: {SITECODE}-M-{YYYY}-{NNNNNN}
- * Example: TINPASS-M-2026-000001
+ * Merged invoice number: {PREFIX}-M-{YYYY}-{NNNNNN}
+ * Example: TPDM-M-2026-000001
  */
 export async function nextMergedInvoiceNo(
   client: PoolClient,
@@ -44,7 +45,7 @@ export async function nextMergedInvoiceNo(
     [siteId, year],
   );
   const seq = upsert.rows[0].last_seq;
-  const code = siteCode.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'SITE';
+  const code = invoiceNumberPrefix(siteCode);
   return `${code}-M-${year}-${String(seq).padStart(6, '0')}`;
 }
 

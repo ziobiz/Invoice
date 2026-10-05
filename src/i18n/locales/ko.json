@@ -248,7 +248,7 @@
   "sites.pdfNoticeBankAdd": "Bank Add",
   "sites.pdfNoticeSwift": "Swift Code",
   "sites.pdfLine": "4. 품목 문구",
-  "sites.pdfLineHint": "프리셋 3개로 Item·Description·Unit 글자(숫자 제외)를 바꿉니다. 비활성 시 원본 상품값이 그대로 나옵니다. Unit 글을 비우면 숫자만 표시됩니다. Unit Price 숨김 시 Unit Price·Unit은 — 이고 Amount만 표시됩니다.",
+  "sites.pdfLineHint": "「품목 문구 노출」에서 활성 A/B/C를 고른 뒤 Item·Description·Unit 글자(숫자 제외)를 입력합니다. 비활성 시 원본 상품값이 그대로 나옵니다. Unit 글을 비우면 숫자만 표시됩니다. Unit Price 숨김 시 Unit Price·Unit은 — 이고 Amount만 표시됩니다.",
   "sites.pdfLineSlot": "품목 문구 노출",
   "sites.lineOff": "비활성",
   "sites.lineActiveA": "활성 A",
@@ -790,5 +790,7 @@
   "merged.selectAllOneGroup": "동일 통화·발주코드·공급코드 그룹만 선택했습니다. 다른 그룹은 제외됩니다.",
   "merged.preview": "미리보기",
   "merged.edit": "수정",
-  "merged.deletedReadonly": "삭제된 문서는 조회만 가능합니다. 수정할 수 없습니다."
+  "merged.deletedReadonly": "삭제된 문서는 조회만 가능합니다. 수정할 수 없습니다.",
+  "sites.pdfLineSlotHint": "아래에서 「품목 문구 노출」을 비활성이 아닌 활성 A(또는 B/C)로 바꾸면 Item·Unit 글자·Description 입력칸이 나타납니다. Unit 글자에 F/SET 을 넣으세요.",
+  "sites.pdfLineActiveFields": "선택됨: {name} — 아래 값이 PDF 품목 칸에 적용됩니다"
 }

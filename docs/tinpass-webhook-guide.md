@@ -5,7 +5,9 @@ Invoice Service가 준비된 뒤, TINPASS(또는 dealmai/pentakleva)는 **거래
 ## Endpoint
 
 ```
-POST {INVOICE_BASE_URL}/v1/webhooks/transactions/completed
+POST {INVOICE_BASE_URL}/v1/webhooks/transactions/ordered
+# legacy alias (DealMai / older clients):
+# POST {INVOICE_BASE_URL}/v1/webhooks/transactions/completed
 ```
 
 ## Headers
@@ -23,7 +25,7 @@ POST {INVOICE_BASE_URL}/v1/webhooks/transactions/completed
 ```json
 {
   "site": "tinpass",
-  "event": "transaction.completed",
+  "event": "transaction.ordered",
   "occurredAt": "2026-09-18T12:00:00+09:00",
   "transactionId": "T-20260918-0001",
   "ticketNo": "TK-10001",
@@ -85,7 +87,7 @@ export async function sendCompletedInvoiceWebhook(payload, idempotencyKey) {
 await sendCompletedInvoiceWebhook(
   {
     site: 'tinpass',
-    event: 'transaction.completed',
+    event: 'transaction.ordered',
     occurredAt: new Date().toISOString(),
     transactionId: 'T-...',
     ticketNo: '...',
@@ -94,7 +96,7 @@ await sendCompletedInvoiceWebhook(
     asset: 'USDT',
     assetAmount: '1000.000000',
   },
-  `tinpass:tx:T-...:completed`, // 안정적 멱등 키 권장
+  `tinpass:usdt:T-...:ordered`, // 안정적 멱등 키 권장
 );
 ```
 
@@ -117,16 +119,20 @@ await sendCompletedInvoiceWebhook(
 }
 ```
 
-## 조회 / PDF
+## 조회 / PDF / 삭제
 
 ```
 GET /v1/invoices
 GET /v1/invoices/:id
 GET /v1/invoices/:id/pdf
 POST /v1/invoices/:id/reissue
+DELETE /v1/invoices/:id
 ```
 
 모두 `X-Api-Key` 필요 (HMAC은 웹훅에만 필수).
+
+`DELETE`는 소프트 삭제(`status=void`, `deleted_at` 설정). TINPASS 주문/티켓은 변경하지 않습니다.
+목록(`GET /v1/invoices`)에는 삭제된 건이 나오지 않습니다.
 
 ## 재시도 권장
 
@@ -138,7 +144,8 @@ POST /v1/invoices/:id/reissue
 
 ## TINPASS (Crypto) 운영 연동
 
-Crypto 백엔드는 USDT 매입 상태가 `COMPLETED`로 전이될 때 위 웹훅을 자동 송신합니다.
+Crypto 백엔드는 USDT **주문 확정**(견적 확정 / 견적 없이 신청 완료) 시 위 웹훅을 자동 송신합니다.
+(거래 COMPLETED가 아닙니다.)
 
 서버 `backend/.env` (Git 금지):
 
@@ -155,11 +162,11 @@ INVOICE_WEBHOOK_ENABLED=true
 ## curl 스모크 테스트
 
 ```bash
-BODY='{"site":"tinpass","event":"transaction.completed","occurredAt":"2026-09-18T12:00:00+09:00","transactionId":"T-DEMO-1","ticketNo":"TK-1","amount":"1000.00","currency":"USD","asset":"USDT","assetAmount":"1000.000000"}'
+BODY='{"site":"tinpass","event":"transaction.ordered","occurredAt":"2026-09-18T12:00:00+09:00","transactionId":"T-DEMO-1","ticketNo":"TK-1","amount":"1000.00","currency":"USD","asset":"USDT","assetAmount":"1000.000000"}'
 SECRET='your-hmac-secret'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
 
-curl -sS -X POST "$INVOICE_BASE_URL/v1/webhooks/transactions/completed" \
+curl -sS -X POST "$INVOICE_BASE_URL/v1/webhooks/transactions/ordered" \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: $API_KEY" \
   -H "X-Signature: $SIG" \

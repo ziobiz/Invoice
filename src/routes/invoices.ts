@@ -11,6 +11,7 @@ import { jsonError } from '../middleware/i18n.js';
 import { t } from '../i18n/index.js';
 import { sealConfigFromSite, pdfDefaultsFromSite, type SiteSealRow } from '../services/seal.js';
 import { resolvePdfLocale } from '../services/pdf.js';
+import { publicInvoicePdfFileName } from '../services/invoice-brand.js';
 
 export const invoicesRouter = Router();
 
@@ -65,8 +66,8 @@ async function refreshInvoicePdf(
     const fromProduct = String(product.remark || '').trim();
     if (fromProduct) return fromProduct;
     const ticket = String(inv.ticket_no || '').trim();
-    if (ticket && !ticket.startsWith('SIM-')) return ticket;
-    return '';
+    if (!ticket || ticket.startsWith('SIM-') || ticket.startsWith('sim-')) return '';
+    return ticket.replace(/^USDT[-_\s]*/i, '');
   })();
   const lineItems =
     items.rowCount && items.rows.length
@@ -180,7 +181,7 @@ async function sendPdf(opts: {
   opts.res.setHeader('Content-Type', 'application/pdf');
   opts.res.setHeader(
     'Content-Disposition',
-    `${inline ? 'inline' : 'attachment'}; filename="${inv.invoice_no}.pdf"`,
+    `${inline ? 'inline' : 'attachment'}; filename="${publicInvoicePdfFileName(String(inv.invoice_no))}"`,
   );
   fs.createReadStream(abs).pipe(opts.res);
 }
@@ -211,6 +212,8 @@ invoicesRouter.get('/v1/invoices', requireApiKey, async (req, res, next) => {
               END AS invoice_kind
        FROM invoices
        WHERE site_id = $1
+         AND deleted_at IS NULL
+         AND status <> 'void'
          AND ($2::text = 'all'
            OR ($2::text = 'simulator' AND memo IS NOT NULL AND memo LIKE '[SIMULATOR]%')
            OR ($2::text = 'sandbox' AND memo IS NOT NULL AND memo LIKE '[SANDBOX]%')
@@ -223,6 +226,51 @@ invoicesRouter.get('/v1/invoices', requireApiKey, async (req, res, next) => {
       [req.siteAuth!.siteId, kind, from, to, buyer, limit, offset],
     );
     res.json({ items: rows.rows, locale: req.locale, kind });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Soft-delete from site (TINPASS): void + deleted_at. Does not touch TINPASS tickets. */
+invoicesRouter.delete('/v1/invoices/:id', requireApiKey, async (req, res, next) => {
+  try {
+    const row = await query(
+      `UPDATE invoices
+       SET status = 'void',
+           deleted_at = COALESCE(deleted_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $1
+         AND site_id = $2
+         AND deleted_at IS NULL
+         AND status <> 'void'
+       RETURNING id, invoice_no, status, deleted_at, site_id`,
+      [req.params.id, req.siteAuth!.siteId],
+    );
+    if (!row.rowCount) {
+      jsonError(res, 404, 'api.error.notFound', req);
+      return;
+    }
+    await writeAudit({
+      eventType: 'invoice.voided',
+      actorType: 'site',
+      actorId: req.siteAuth!.siteCode,
+      siteId: row.rows[0].site_id,
+      invoiceId: row.rows[0].id,
+      detail: {
+        invoiceNo: row.rows[0].invoice_no,
+        source: 'site_api',
+      },
+      ip: req.ip,
+    });
+    res.json({
+      invoice: {
+        id: row.rows[0].id,
+        invoiceNo: row.rows[0].invoice_no,
+        status: row.rows[0].status,
+        deletedAt: row.rows[0].deleted_at,
+      },
+      locale: req.locale,
+    });
   } catch (e) {
     next(e);
   }

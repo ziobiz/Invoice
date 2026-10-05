@@ -19,6 +19,7 @@ import {
   mergedPdfAbsPath,
   type MergedMode,
 } from '../services/merged-invoice.js';
+import { publicInvoicePdfFileName } from '../services/invoice-brand.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -1460,7 +1461,7 @@ adminRouter.get('/merged/:id/pdf', async (req, res, next) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${encodeURIComponent(detail.merged.invoice_no)}.pdf"`,
+      `inline; filename="${encodeURIComponent(publicInvoicePdfFileName(detail.merged.invoice_no))}"`,
     );
     fs.createReadStream(abs).pipe(res);
   } catch (e) {

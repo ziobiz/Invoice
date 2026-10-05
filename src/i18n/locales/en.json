@@ -248,7 +248,7 @@
   "sites.pdfNoticeBankAdd": "Bank Add",
   "sites.pdfNoticeSwift": "Swift Code",
   "sites.pdfLine": "4. Line item text",
-  "sites.pdfLineHint": "Three presets override Item, Description, and Unit text (quantity numbers stay). Off keeps the original product values. Empty Unit text shows the number only. Hide Unit Price shows — for Unit Price and Unit; Amount still prints.",
+  "sites.pdfLineHint": "Pick Active A/B/C under “Line text exposure”, then set Item, Description, and Unit text (non-numeric). When Off, original product values are used. Empty Unit text shows quantity only. Hiding Unit Price shows — for Unit Price/Unit and keeps Amount.",
   "sites.pdfLineSlot": "Line text exposure",
   "sites.lineOff": "Off",
   "sites.lineActiveA": "Active A",
@@ -796,5 +796,7 @@
   "merged.selectAllOneGroup": "Selected one group only (same currency and party codes). Other groups were skipped.",
   "merged.preview": "Preview",
   "merged.edit": "Edit",
-  "merged.deletedReadonly": "Deleted documents are view-only and cannot be edited."
+  "merged.deletedReadonly": "Deleted documents are view-only and cannot be edited.",
+  "sites.pdfLineSlotHint": "Change “Line text exposure” from Off to Active A (or B/C) to show Item, Unit text, and Description. Enter F/SET in Unit text.",
+  "sites.pdfLineActiveFields": "Selected: {name} — values below apply to the PDF line"
 }

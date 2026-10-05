@@ -179,6 +179,14 @@ function t(key, vars) {
   if (vars) Object.entries(vars).forEach(([k,v]) => { text = text.replaceAll('{'+k+'}', String(v)); });
   return text;
 }
+/** Never show TINPASS on invoice numbers / download names — public brand is TPDM. */
+function publicInvoiceNo(no) {
+  let s = String(no || '');
+  s = s.replace(/^TINPASSSIM\b/gi, 'TPDMSIM');
+  s = s.replace(/^TINPASS\b/gi, 'TPDM');
+  s = s.replace(/TINPASS/gi, 'TPDM');
+  return s;
+}
 /** Invoice PDF system phrases stay English even when the admin UI language changes. */
 function pdfEn(key) {
   return I18N_EN[key] || I18N[key] || key;
@@ -1252,7 +1260,7 @@ async function invoices() {
       ].filter(Boolean).join(' ');
       return `<tr class="${rowClass}" data-inv-id="${i.id}" data-status="${escHtml(i.status||'')}" ondblclick="onInvoiceRowDbl(event,'${i.id}')">
       <td>${fmtIssued(i.issued_at)}</td>
-      <td class="mono">${escHtml(i.invoice_no)}</td>
+      <td class="mono">${escHtml(publicInvoiceNo(i.invoice_no))}</td>
       <td>${escHtml(i.site_code)}</td>
       <td class="mono inv-party-code">${escHtml(i.buyer_code || '—')}</td>
       <td class="mono inv-party-code">${escHtml(i.seller_code || '—')}</td>
@@ -1370,12 +1378,12 @@ async function editInvoice(id) {
   editRow.className = 'inv-edit-row';
   editRow.innerHTML = `<td colspan="14">
     <div class="inv-edit-panel">
-      <h3>${t('invoices.edit')} · <span class="mono">${escHtml(inv.invoice_no)}</span>
+      <h3>${t('invoices.edit')} · <span class="mono">${escHtml(publicInvoiceNo(inv.invoice_no))}</span>
         <span class="pg-card-hint" style="display:inline;margin-left:.5rem;font-weight:400">${t('invoices.editHint')}</span>
       </h3>
       <div class="pg-label" style="margin:.35rem 0">${t('invoices.editLocked')}</div>
       <div class="pg-row">
-        ${locked(t('invoices.col.no'), inv.invoice_no)}
+        ${locked(t('invoices.col.no'), publicInvoiceNo(inv.invoice_no))}
         ${locked(t('invoices.col.site'), inv.site_code)}
         ${locked(t('invoices.col.currency'), inv.currency)}
         ${locked(t('invoices.col.amount'), fmtMoney(inv.amount, inv.currency))}
@@ -1638,10 +1646,31 @@ function syncNoticeSlotUi() {
   });
   const remarksOn = document.getElementById('pdfRemarksEnabled')?.value !== 'false';
   document.getElementById('remarksFieldsBox')?.classList.toggle('hidden', !remarksOn);
-  const lineSlot = document.getElementById('pdfLineSlot')?.value || 'off';
+  syncLineSlotUi();
+}
+
+function getLineSlotValue() {
+  return document.getElementById('pdfLineSlot')?.value
+    || document.getElementById('pdfLineSlotTop')?.value
+    || 'off';
+}
+
+function onLineSlotChange(source) {
+  const main = document.getElementById('pdfLineSlot');
+  const top = document.getElementById('pdfLineSlotTop');
+  const val = source === 'top' ? (top?.value || 'off') : (main?.value || 'off');
+  if (main && main.value !== val) main.value = val;
+  if (top && top.value !== val) top.value = val;
+  syncLineSlotUi();
+}
+
+function syncLineSlotUi() {
+  const lineSlot = getLineSlotValue();
   document.querySelectorAll('.line-slot-fields').forEach((el) => {
     el.classList.toggle('hidden', el.getAttribute('data-slot') !== lineSlot || lineSlot === 'off');
   });
+  const hint = document.getElementById('pdfLineSlotHint');
+  if (hint) hint.classList.toggle('hidden', lineSlot !== 'off');
 }
 
 /** When turning watermark ON, default SAMPLE on. Turning watermark OFF does not force SAMPLE off (independent). */
@@ -1751,7 +1780,8 @@ async function openSiteSeals(siteId) {
     ];
   };
   const lineFields = (key, item, description, unitLabel, hideUnitPrice) => `
-    <div class="line-slot-fields notice-slot-fields ${lineSlot === key ? '' : 'hidden'}" data-slot="${key}">
+    <div class="line-slot-fields ${lineSlot === key ? '' : 'hidden'}" data-slot="${key}" style="margin-top:.65rem;padding:.75rem;border:1px solid var(--shell-card-border);border-radius:6px;background:#fafbfc">
+      <div class="pg-label" style="margin:0 0 .35rem">${escHtml(t('sites.pdfLineActiveFields', { name: key === 'a' ? lineNameA : key === 'b' ? lineNameB : lineNameC }))}</div>
       <div class="pg-row" style="margin-top:.5rem">
         <div><label class="pg-label">${t('sites.pdfLineItem')}</label>
           <input class="pg-input" id="pdfLine_${key}_item" value="${escHtml(item || '')}"/></div>
@@ -1827,7 +1857,7 @@ async function openSiteSeals(siteId) {
             </select>
           </div>
           <div><label class="pg-label">${t('sites.pdfLineSlot')}</label>
-            <select class="pg-select" id="pdfLineSlot" onchange="syncNoticeSlotUi()">
+            <select class="pg-select" id="pdfLineSlotTop" onchange="onLineSlotChange('top')">
               <option value="off" ${lineSlot === 'off' ? 'selected' : ''}>${t('sites.lineOff')}</option>
               <option value="a" ${lineSlot === 'a' ? 'selected' : ''}>${escHtml(lineNameA)}</option>
               <option value="b" ${lineSlot === 'b' ? 'selected' : ''}>${escHtml(lineNameB)}</option>
@@ -1876,7 +1906,19 @@ async function openSiteSeals(siteId) {
 
         <div class="pg-label" style="margin-top:1rem">${t('sites.pdfLine')}</div>
         <p class="pg-card-hint">${t('sites.pdfLineHint')}</p>
-        <div class="pg-row" id="lineSlotNames" style="margin-top:.35rem">
+        <div class="pg-row" style="margin-top:.5rem">
+          <div>
+            <label class="pg-label">${t('sites.pdfLineSlot')}</label>
+            <select class="pg-select" id="pdfLineSlot" onchange="onLineSlotChange('main')">
+              <option value="off" ${lineSlot === 'off' ? 'selected' : ''}>${t('sites.lineOff')}</option>
+              <option value="a" ${lineSlot === 'a' ? 'selected' : ''}>${escHtml(lineNameA)}</option>
+              <option value="b" ${lineSlot === 'b' ? 'selected' : ''}>${escHtml(lineNameB)}</option>
+              <option value="c" ${lineSlot === 'c' ? 'selected' : ''}>${escHtml(lineNameC)}</option>
+            </select>
+          </div>
+        </div>
+        <p class="pg-card-hint ${lineSlot === 'off' ? '' : 'hidden'}" id="pdfLineSlotHint" style="margin-top:.35rem">${t('sites.pdfLineSlotHint')}</p>
+        <div class="pg-row" id="lineSlotNames" style="margin-top:.5rem">
           <div><label class="pg-label">${t('sites.lineNameA')}</label>
             <input class="pg-input" id="pdfLine_a_name" value="${escHtml(lineNameA)}" oninput="refreshLineSlotOptions()"/></div>
           <div><label class="pg-label">${t('sites.lineNameB')}</label>
@@ -1944,18 +1986,22 @@ function refreshNoticeSlotOptions() {
 }
 
 function refreshLineSlotOptions() {
-  const sel = document.getElementById('pdfLineSlot');
-  if (!sel) return;
   const a = document.getElementById('pdfLine_a_name')?.value || t('sites.lineActiveA');
   const b = document.getElementById('pdfLine_b_name')?.value || t('sites.lineActiveB');
   const c = document.getElementById('pdfLine_c_name')?.value || t('sites.lineActiveC');
-  const cur = sel.value;
-  sel.innerHTML = `
+  const cur = getLineSlotValue();
+  const html = `
     <option value="off">${t('sites.lineOff')}</option>
     <option value="a">${escHtml(a)}</option>
     <option value="b">${escHtml(b)}</option>
     <option value="c">${escHtml(c)}</option>`;
-  sel.value = cur;
+  for (const id of ['pdfLineSlot', 'pdfLineSlotTop']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    sel.innerHTML = html;
+    sel.value = cur;
+  }
+  syncLineSlotUi();
 }
 
 async function uploadSiteSeal(siteId, kind, input) {
@@ -1993,7 +2039,7 @@ async function saveSiteSealSettings(siteId) {
     stamp: { seal_use_official: false, seal_use_stamp: true, seal_use_signature: false },
   }[mode] || { seal_use_official: true, seal_use_stamp: true, seal_use_signature: false };
   const slot = document.getElementById('pdfNoticeSlot')?.value || 'off';
-  const lineSlot = document.getElementById('pdfLineSlot')?.value || 'off';
+  const lineSlot = getLineSlotValue();
   const pack = (key) => ({
     [`pdf_notice_${key}_name`]: document.getElementById(`pdfNotice_${key}_name`)?.value || '',
     [`pdf_notice_${key}_text`]: document.getElementById(`pdfNotice_${key}_text`)?.value || '',
@@ -2976,7 +3022,7 @@ async function merged() {
                 .map(
                   (r) => `<tr>
                 <td><input type="checkbox" class="merged-cand" value="${r.id}" data-group="${escHtml(gk)}" data-site="${escHtml(r.site_id)}"/></td>
-                <td class="mono">${escHtml(r.invoice_no)}</td>
+                <td class="mono">${escHtml(publicInvoiceNo(r.invoice_no))}</td>
                 <td>${escHtml(r.date || String(r.issued_at).slice(0, 10))}</td>
                 <td>${escHtml(fmtMoney(r.amount, r.currency))} ${escHtml(r.currency)}</td>
                 <td class="mono">${escHtml(r.seller_code || '')}</td>
@@ -3077,7 +3123,7 @@ async function merged() {
           const kind = m.kind === 'original' ? t('merged.kind.original') : t('merged.kind.revision', { n: m.revision_no });
           const modeLabel = m.mode === 'total' ? t('merged.mode.total') : t('merged.mode.lines');
           return `<tr class="pg-row-edit ${m.deleted_at ? 'inv-row-deleted' : ''}" ondblclick="onMergedRowDbl(event,'${m.id}')">
-            <td class="mono">${escHtml(m.invoice_no)}</td>
+            <td class="mono">${escHtml(publicInvoiceNo(m.invoice_no))}</td>
             <td>${escHtml(m.site_code)}</td>
             <td>${escHtml(String(m.issued_at).slice(0, 10))}</td>
             <td>${escHtml(fmtMoney(m.amount, m.currency))} ${escHtml(m.currency)}</td>
@@ -3262,7 +3308,7 @@ async function openMergedDetail(id) {
     const versions = (d.versions || [])
       .map(
         (v) =>
-          `<button type="button" class="pg-btn ${v.id === id ? 'pg-btn-primary' : ''}" style="margin:0" onclick="openMergedDetail('${v.id}')">${escHtml(v.invoice_no)}${v.deleted_at ? ' [' + t('merged.deletedYes') + ']' : ''}</button>`,
+          `<button type="button" class="pg-btn ${v.id === id ? 'pg-btn-primary' : ''}" style="margin:0" onclick="openMergedDetail('${v.id}')">${escHtml(publicInvoiceNo(v.invoice_no))}${v.deleted_at ? ' [' + t('merged.deletedYes') + ']' : ''}</button>`,
       )
       .join(' ');
     const items = d.items || [];
@@ -3282,11 +3328,11 @@ async function openMergedDetail(id) {
       .join('');
 
     box.innerHTML = `<div class="party-form-card">
-      <h3>${t('merged.detailTitle')} · <span class="mono">${escHtml(m.invoice_no)}</span>
+      <h3>${t('merged.detailTitle')} · <span class="mono">${escHtml(publicInvoiceNo(m.invoice_no))}</span>
         <span class="pg-card-hint" style="font-weight:400;margin-left:.5rem">${isOriginal ? t('merged.kind.original') : t('merged.kind.revision', { n: m.revision_no })}</span>
       </h3>
       <p class="pg-card-hint">${t('merged.versions')}: ${versions || '—'}</p>
-      <p class="pg-card-hint">${t('merged.sources')}: ${(d.sources || []).map((s) => escHtml(s.invoice_no)).join(', ') || '—'}</p>
+      <p class="pg-card-hint">${t('merged.sources')}: ${(d.sources || []).map((s) => escHtml(publicInvoiceNo(s.invoice_no))).join(', ') || '—'}</p>
       ${isOriginal && !deleted ? `<p class="pg-card-hint">${t('merged.originalReadonlyHint')}</p>` : ''}
       <div class="pg-row">
         <div><label class="pg-label">${t('invoices.col.currency')}</label>

@@ -239,7 +239,7 @@
   "sites.pdfNoticeBankAdd": "Bank Add",
   "sites.pdfNoticeSwift": "Swift Code",
   "sites.pdfLine": "4. ข้อความรายการ",
-  "sites.pdfLineHint": "พรีเซ็ต 3 แบบแทนที่ข้อความ Item, Description และ Unit (คงตัวเลข) ปิด = ค่าสินค้าเดิม Unit ว่าง = แสดงเฉพาะตัวเลข ซ่อน Unit Price = แสดง — ที่ Unit Price/Unit แต่ Amount ยังออก",
+  "sites.pdfLineHint": "เลือก Active A/B/C ที่「การแสดงข้อความรายการ」แล้วใส่ Item/Description/Unit (ไม่ใช่ตัวเลข) ปิดแล้วใช้ค่าสินค้าเดิม",
   "sites.pdfLineSlot": "การแสดงข้อความรายการ",
   "sites.lineOff": "ปิด",
   "sites.lineActiveA": "Active A",
@@ -787,5 +787,7 @@
   "merged.selectAllOneGroup": "เลือกเฉพาะกลุ่มเดียวกัน (สกุลเงินและรหัสคู่ค้าเดียวกัน) กลุ่มอื่นถูกข้าม",
   "merged.preview": "ดูตัวอย่าง",
   "merged.edit": "แก้ไข",
-  "merged.deletedReadonly": "เอกสารที่ลบแล้วดูได้อย่างเดียว แก้ไขไม่ได้"
+  "merged.deletedReadonly": "เอกสารที่ลบแล้วดูได้อย่างเดียว แก้ไขไม่ได้",
+  "sites.pdfLineSlotHint": "เปลี่ยน「การแสดงข้อความรายการ」จากปิด เป็น Active A (หรือ B/C) จะมีช่อง Item/Unit/Description ให้ใส่ Unit เป็น F/SET",
+  "sites.pdfLineActiveFields": "ที่เลือก: {name} — ค่าด้านล่างใช้กับบรรทัดใน PDF"
 }

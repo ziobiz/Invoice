@@ -239,7 +239,7 @@
   "sites.pdfNoticeBankAdd": "Bank Add",
   "sites.pdfNoticeSwift": "Swift Code",
   "sites.pdfLine": "4. 明细文案",
-  "sites.pdfLineHint": "三套预设可覆盖 Item、Description、Unit 文字（保留数字）。停用时用原始商品值。Unit 文字留空则只显示数量数字。隐藏 Unit Price 时 Unit Price/Unit 显示 —，Amount 仍打印。",
+  "sites.pdfLineHint": "在「品目文案显示」中选择启用 A/B/C，再填写 Item、Description、Unit（非数字）。关闭时使用原始商品值。",
   "sites.pdfLineSlot": "明细文案显示",
   "sites.lineOff": "停用",
   "sites.lineActiveA": "启用 A",
@@ -787,5 +787,7 @@
   "merged.selectAllOneGroup": "仅选择同一币种与订购/供货代码的一组，其他组已排除。",
   "merged.preview": "预览",
   "merged.edit": "修改",
-  "merged.deletedReadonly": "已删除文档仅可查看，无法修改。"
+  "merged.deletedReadonly": "已删除文档仅可查看，无法修改。",
+  "sites.pdfLineSlotHint": "将「品目文案显示」从关闭改为启用 A（或 B/C）后会出现 Item、Unit、Description。Unit 填写 F/SET。",
+  "sites.pdfLineActiveFields": "已选: {name} — 以下内容会用于 PDF 品目"
 }

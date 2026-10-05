@@ -647,6 +647,7 @@ body {
   font-weight: 600;
 }
 .inv-kind-live { background: #ecfdf3; color: #166534; }
+.inv-kind-official { background: #eff6ff; color: #1e40af; }
 .inv-kind-simulator { background: #eef2ff; color: #3730a3; }
 .inv-kind-sandbox { background: #fffbeb; color: #92400e; }
 .inv-actions { white-space: nowrap; }

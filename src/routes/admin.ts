@@ -958,9 +958,11 @@ adminRouter.get('/invoices', async (req, res, next) => {
         ? 'simulator'
         : kindRaw === 'sandbox' || kindRaw === 'yes' || kindRaw === 'true' || kindRaw === '1'
           ? 'sandbox'
-          : kindRaw === 'all'
-            ? 'all'
-            : 'live';
+          : kindRaw === 'official' || kindRaw === 'original'
+            ? 'official'
+            : kindRaw === 'all'
+              ? 'all'
+              : 'live';
 
     let statusQ: string | null = null;
     if (q && (qField === 'status' || qField === 'all')) {
@@ -983,9 +985,14 @@ adminRouter.get('/invoices', async (req, res, next) => {
            $2::text = 'all'
            OR ($2::text = 'simulator' AND i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%')
            OR ($2::text = 'sandbox' AND i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%')
+           OR ($2::text = 'official' AND i.memo IS NOT NULL AND i.memo LIKE '[OFFICIAL]%')
            OR (
              $2::text = 'live'
-             AND (i.memo IS NULL OR (i.memo NOT LIKE '[SIMULATOR]%' AND i.memo NOT LIKE '[SANDBOX]%'))
+             AND (i.memo IS NULL OR (
+               i.memo NOT LIKE '[SIMULATOR]%'
+               AND i.memo NOT LIKE '[SANDBOX]%'
+               AND i.memo NOT LIKE '[OFFICIAL]%'
+             ))
            )
          )
          AND (
@@ -1045,6 +1052,7 @@ adminRouter.get('/invoices', async (req, res, next) => {
               CASE
                 WHEN i.memo IS NOT NULL AND i.memo LIKE '[SIMULATOR]%' THEN 'simulator'
                 WHEN i.memo IS NOT NULL AND i.memo LIKE '[SANDBOX]%' THEN 'sandbox'
+                WHEN i.memo IS NOT NULL AND i.memo LIKE '[OFFICIAL]%' THEN 'official'
                 ELSE 'live'
               END AS invoice_kind
        FROM invoices i
@@ -1061,6 +1069,7 @@ adminRouter.get('/invoices', async (req, res, next) => {
         invoice_kind: r.invoice_kind,
         is_sandbox: r.invoice_kind === 'sandbox',
         is_simulator: r.invoice_kind === 'simulator',
+        is_official: r.invoice_kind === 'official',
       })),
       total: Number(count.rows[0]?.c || 0),
       limit,

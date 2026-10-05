@@ -1003,6 +1003,7 @@ function fmtIssued(iso) {
 function invoiceKindOf(row) {
   if (row.invoice_kind === 'simulator' || row.is_simulator) return 'simulator';
   if (row.invoice_kind === 'sandbox' || row.is_sandbox) return 'sandbox';
+  if (row.invoice_kind === 'official' || row.is_official) return 'official';
   return 'live';
 }
 
@@ -1192,6 +1193,7 @@ async function invoices() {
   const kindOptions = [
     ['all', 'invoices.filter.all'],
     ['live', 'invoices.filter.live'],
+    ['official', 'invoices.filter.official'],
     ['simulator', 'invoices.filter.simulator'],
     ['sandbox', 'invoices.filter.sandbox'],
   ].map(([v, key]) => `<option value="${v}" ${invoiceKindFilter===v?'selected':''}>${t(key)}</option>`).join('');

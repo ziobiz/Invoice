@@ -12,6 +12,7 @@ export async function nextInvoiceNo(
   siteId: string,
   siteCode: string,
   year: number,
+  opts?: { official?: boolean },
 ): Promise<string> {
   const upsert = await client.query<{ last_seq: number }>(
     `INSERT INTO invoice_sequences (site_id, year, last_seq)
@@ -22,7 +23,7 @@ export async function nextInvoiceNo(
     [siteId, year],
   );
   const seq = upsert.rows[0].last_seq;
-  const code = invoiceNumberPrefix(siteCode);
+  const code = invoiceNumberPrefix(siteCode, { official: opts?.official === true });
   return `${code}-${year}-${String(seq).padStart(6, '0')}`;
 }
 

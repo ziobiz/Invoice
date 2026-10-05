@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { config } from '../config.js';
 import { t, type Locale, DEFAULT_LOCALE, resolveLocale } from '../i18n/index.js';
 import type { SiteSealConfig, SitePdfDefaults } from './seal.js';
-import { toPublicInvoiceNo } from './invoice-brand.js';
+import { isOfficialMemo, toPublicInvoiceNo } from './invoice-brand.js';
 
 export type PartySnap = {
   code: string;
@@ -340,8 +340,14 @@ function isCryptoAssetUnit(unit: string | null | undefined): boolean {
   return /^(USDT|USDC|BTC|ETH|TRX|BNB|XRP|SOL)$/i.test(String(unit || '').trim());
 }
 
-function unitCell(line: LineItemInput): string {
+function unitCell(line: LineItemInput, opts?: { raw?: boolean }): string {
   if (line.hideUnitPrice) return '—';
+  // Official (원본) invoices: keep quantity + asset unit as-is (e.g. "23169 USDT")
+  if (opts?.raw) {
+    const q = qty(line.quantity);
+    const u = String(line.unit || '').trim();
+    return u ? `${q} ${u}` : q;
+  }
   // Bank remittance PDF: never show crypto ticker/amount in Unit (e.g. "23169 USDT")
   const crypto = isCryptoAssetUnit(line.unit);
   const q = crypto ? '1' : qty(line.quantity);
@@ -413,7 +419,9 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
 
   const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const sitePdfEarly = input.sitePdf;
-  const displayLines = applySiteLinePreset(lines, sitePdfEarly);
+  const isOfficial = isOfficialMemo(input.memo);
+  // Official = original trade lines (skip site line-slot / unit rewrite presets)
+  const displayLines = isOfficial ? lines : applySiteLinePreset(lines, sitePdfEarly);
 
   let qrBuf: Buffer | null = null;
   if (input.verifyUrl) {
@@ -638,7 +646,7 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
           align: 'right',
           color: hidePrice ? COLORS.muted : COLORS.amount,
         },
-        { text: unitCell(line), w: cols.unit, align: 'center' },
+        { text: unitCell(line, { raw: isOfficial }), w: cols.unit, align: 'center' },
         {
           text: money(line.amount, input.currency),
           w: cols.amount,
@@ -742,9 +750,11 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
       sitePdfEarly?.simulatorSampleSealEnabled !== false;
     const kindKey = isSimulator
       ? null // simulator: no "Type: Simulator" line — red watermark on signature instead
-      : memo.startsWith('[SANDBOX]')
-        ? 'pdf.kind.sandbox'
-        : null;
+      : /^\[OFFICIAL\]/i.test(memo)
+        ? 'pdf.kind.official'
+        : memo.startsWith('[SANDBOX]')
+          ? 'pdf.kind.sandbox'
+          : null;
     const publicTx =
       input.sourceTransactionId &&
       !input.sourceTransactionId.startsWith('sim-') &&
@@ -754,7 +764,7 @@ export async function generateInvoicePdf(input: InvoicePdfInput): Promise<{
     const ticket =
       input.ticketNo && !String(input.ticketNo).startsWith('SIM-') ? String(input.ticketNo) : '';
     const note = memo
-      .replace(/^\[(SIMULATOR|SANDBOX)(?::[^\]]*)?\]\s*/i, '')
+      .replace(/^\[(SIMULATOR|SANDBOX|OFFICIAL)(?::[^\]]*)?\]\s*/i, '')
       .replace(/\|\s*/g, ' ')
       .replace(/\b(network|feeMode)\s*:\s*\S+/gi, '')
       .replace(/\s{2,}/g, ' ')

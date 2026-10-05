@@ -3,11 +3,20 @@
  * filenames / PDF labels. Site API code stays `tinpass` / `tinpass-sim`.
  */
 
+/** Memo tag for unprocessed / original-trade invoices (공식거래). */
+export function isOfficialMemo(memo?: string | null): boolean {
+  return /^\[OFFICIAL\]/i.test(String(memo || '').trim());
+}
+
 /** Prefix used when allocating new invoice numbers. */
-export function invoiceNumberPrefix(siteCode: string): string {
+export function invoiceNumberPrefix(
+  siteCode: string,
+  opts?: { official?: boolean },
+): string {
   const c = String(siteCode || '')
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '');
+  if (c === 'tinpass' && opts?.official) return 'TPDMO';
   if (c === 'tinpass') return 'TPDM';
   if (c === 'tinpass-sim' || c === 'tinpasssim') return 'TPDMSIM';
   const raw = String(siteCode || '')

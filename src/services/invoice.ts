@@ -5,6 +5,7 @@ import { nextInvoiceNo } from './numbering.js';
 import { generateInvoicePdf } from './pdf.js';
 import { writeAudit, randomToken } from './crypto.js';
 import { sealConfigFromSite, pdfDefaultsFromSite, type SiteSealRow } from './seal.js';
+import { isOfficialMemo } from './invoice-brand.js';
 
 function verifyUrlFor(token: string): string {
   const base = (config.publicBaseUrl || '').replace(/\/$/, '') || 'http://localhost:3100';
@@ -212,7 +213,9 @@ export async function issueFromWebhook(opts: {
       });
     }
     const year = issuedAt.getFullYear();
-    const invoiceNo = await nextInvoiceNo(client, siteId, siteCode, year);
+    const invoiceNo = await nextInvoiceNo(client, siteId, siteCode, year, {
+      official: isOfficialMemo(body.memo),
+    });
 
     const sellerSnapshot = partySnap(seller);
     const buyerSnapshot = partySnap(buyer);
@@ -395,7 +398,11 @@ export async function reissueInvoice(invoiceId: string, adminId: string, ip?: st
     const siteCode = site.rows[0].code;
     const issuedAt = new Date();
     const year = issuedAt.getFullYear();
-    const invoiceNo = await nextInvoiceNo(client, original.site_id, siteCode, year);
+    const invoiceNo = await nextInvoiceNo(client, original.site_id, siteCode, year, {
+      official: isOfficialMemo(
+        original.memo != null ? String(original.memo) : null,
+      ),
+    });
 
     // Latest buyer / supplier / product from site mapping (amount stays the same)
     const { seller, buyer, product } = await resolveParties(client, original.site_id, {});

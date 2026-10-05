@@ -196,9 +196,11 @@ invoicesRouter.get('/v1/invoices', requireApiKey, async (req, res, next) => {
         ? 'simulator'
         : kindRaw === 'sandbox'
           ? 'sandbox'
-          : kindRaw === 'live'
-            ? 'live'
-            : 'all';
+          : kindRaw === 'official' || kindRaw === 'original'
+            ? 'official'
+            : kindRaw === 'live'
+              ? 'live'
+              : 'all';
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
     const buyer = req.query.buyer ? String(req.query.buyer) : null;
@@ -208,6 +210,7 @@ invoicesRouter.get('/v1/invoices', requireApiKey, async (req, res, next) => {
               CASE
                 WHEN memo IS NOT NULL AND memo LIKE '[SIMULATOR]%' THEN 'simulator'
                 WHEN memo IS NOT NULL AND memo LIKE '[SANDBOX]%' THEN 'sandbox'
+                WHEN memo IS NOT NULL AND memo LIKE '[OFFICIAL]%' THEN 'official'
                 ELSE 'live'
               END AS invoice_kind
        FROM invoices
@@ -217,7 +220,12 @@ invoicesRouter.get('/v1/invoices', requireApiKey, async (req, res, next) => {
          AND ($2::text = 'all'
            OR ($2::text = 'simulator' AND memo IS NOT NULL AND memo LIKE '[SIMULATOR]%')
            OR ($2::text = 'sandbox' AND memo IS NOT NULL AND memo LIKE '[SANDBOX]%')
-           OR ($2::text = 'live' AND (memo IS NULL OR (memo NOT LIKE '[SIMULATOR]%' AND memo NOT LIKE '[SANDBOX]%'))))
+           OR ($2::text = 'official' AND memo IS NOT NULL AND memo LIKE '[OFFICIAL]%')
+           OR ($2::text = 'live' AND (memo IS NULL OR (
+             memo NOT LIKE '[SIMULATOR]%'
+             AND memo NOT LIKE '[SANDBOX]%'
+             AND memo NOT LIKE '[OFFICIAL]%'
+           ))))
          AND ($3::text IS NULL OR issued_at >= $3::date)
          AND ($4::text IS NULL OR issued_at < ($4::date + interval '1 day'))
          AND ($5::text IS NULL OR buyer_ref = ANY(string_to_array($5, ',')))

@@ -95,6 +95,37 @@ async function seed() {
   );
   console.log('Synced OTL party profiles from Excel PI template');
 
+  // TINPASS purchase SKUs (idempotent) — USDT + USDC
+  {
+    const ensureProduct = async (code: string, name: string, description: string, unit: string) => {
+      const existing = await query<{ id: string }>(`SELECT id FROM products WHERE code = $1`, [code]);
+      if (existing.rowCount && existing.rowCount > 0) {
+        console.log(`Product ${code} already exists, skip`);
+        return existing.rows[0].id;
+      }
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO products (code, name, description, unit, default_currency, remark)
+         VALUES ($1, $2, $3, $4, 'USD', $5)
+         RETURNING id`,
+        [code, name, description, unit, `Virtual asset (${unit}) purchase`],
+      );
+      console.log(`Seeded product: ${code}`);
+      return inserted.rows[0].id;
+    };
+    await ensureProduct(
+      'USDT-PURCHASE',
+      'USDT Purchase',
+      'Virtual asset (USDT) purchase settlement',
+      'USDT',
+    );
+    await ensureProduct(
+      'USDC-PURCHASE',
+      'USDC Purchase',
+      'Virtual asset (USDC) purchase settlement',
+      'USDC',
+    );
+  }
+
   // DealMai site (idempotent) — ChillPay settle + ontheline Paid → webhook
   {
     let dealmai = await query<{ id: string }>(`SELECT id FROM sites WHERE code = 'dealmai'`);

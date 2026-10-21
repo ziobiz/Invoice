@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice Service</title>
   <!-- BRAND_META -->
-  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20260923simWm1" />
+  <link rel="stylesheet" href="/admin/crypto-shell.css?v=20261021row2" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   <script src="/admin/manuals.js?v=20260923simWm1"></script>
 </head>
@@ -232,7 +232,7 @@ function applyI18n() {
   applyBranding();
 }
 async function loadI18n(lang) {
-  const ver = '20260923pdfEn1';
+  const ver = '20261021row2';
   const [ui, en] = await Promise.all([
     fetch('/locales/'+lang+'.json?v='+ver).then((r) => r.json()),
     Object.keys(I18N_EN).length
@@ -2870,6 +2870,8 @@ let mergedSellerCode = '';
 /** true only after 불러오기 / period preset — avoids silent auto-search */
 let mergedLoadCandidates = false;
 let mergedPresetKind = '';
+let mergedRenderSeq = 0;
+let mergedApplyingDates = false;
 let mergedPdfMode = 'lines';
 let mergedSelectAction = ''; // 'all' | 'none' | ''
 let mergedLastAction = ''; // 'load' | 'reset' | 'create' | ''
@@ -2886,64 +2888,75 @@ function mergedMonthBounds(offsetMonths) {
   return { from: fmtDateInput(start), to: fmtDateInput(end) };
 }
 
+function mergedPresetRange(kind) {
+  const today = new Date();
+  const shift = (days) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + days);
+    return fmtDateInput(d);
+  };
+  const todayStr = fmtDateInput(today);
+  if (kind === 'today') return { from: todayStr, to: todayStr };
+  if (kind === 'yesterday') {
+    const y = shift(-1);
+    return { from: y, to: y };
+  }
+  if (kind === 'week1') return { from: shift(-6), to: todayStr };
+  if (kind === 'week2') return { from: shift(-13), to: todayStr };
+  if (kind === 'month0') {
+    const b = mergedMonthBounds(0);
+    return { from: b.from, to: todayStr };
+  }
+  if (kind === 'month1') return mergedMonthBounds(-1);
+  if (kind === 'month2') return mergedMonthBounds(-2);
+  return null;
+}
+
+function applyMergedDateInputs() {
+  const fromEl = document.getElementById('mergedFrom');
+  const toEl = document.getElementById('mergedTo');
+  if (!fromEl && !toEl) return;
+  mergedApplyingDates = true;
+  try {
+    if (fromEl) fromEl.value = mergedFrom || '';
+    if (toEl) toEl.value = mergedTo || '';
+  } finally {
+    mergedApplyingDates = false;
+  }
+}
+
+function onMergedDateChanged(which, value) {
+  if (mergedApplyingDates) return;
+  mergedPresetKind = '';
+  if (which === 'from') mergedFrom = value;
+  else mergedTo = value;
+}
+
 function setMergedRangePreset(kind) {
+  const range = mergedPresetRange(kind);
+  if (!range) return;
   mergedPresetKind = kind;
   mergedLastAction = '';
-  const today = new Date();
-  let from = today;
-  let to = today;
-  if (kind === 'today') {
-    from = today;
-    to = today;
-  } else if (kind === 'yesterday') {
-    const y = new Date(today);
-    y.setDate(y.getDate() - 1);
-    from = y;
-    to = y;
-  } else if (kind === 'week1') {
-    from = new Date(today);
-    from.setDate(from.getDate() - 6);
-    to = today;
-  } else if (kind === 'week2') {
-    from = new Date(today);
-    from.setDate(from.getDate() - 13);
-    to = today;
-  } else if (kind === 'month0') {
-    const b = mergedMonthBounds(0);
-    mergedFrom = b.from;
-    mergedTo = fmtDateInput(today);
-    mergedLoadCandidates = true;
-    merged();
-    return;
-  } else if (kind === 'month1') {
-    const b = mergedMonthBounds(-1);
-    mergedFrom = b.from;
-    mergedTo = b.to;
-    mergedLoadCandidates = true;
-    merged();
-    return;
-  } else if (kind === 'month2') {
-    const b = mergedMonthBounds(-2);
-    mergedFrom = b.from;
-    mergedTo = b.to;
-    mergedLoadCandidates = true;
-    merged();
-    return;
-  }
-  mergedFrom = fmtDateInput(from);
-  mergedTo = fmtDateInput(to);
+  mergedFrom = range.from;
+  mergedTo = range.to;
   mergedLoadCandidates = true;
+  applyMergedDateInputs();
   merged();
 }
 
 async function merged() {
-  const sites = await api('/admin/api/sites');
-  const siteList = sites.items || [];
   if (!mergedFrom || !mergedTo) {
     const r = defaultDateRange(7);
     mergedFrom = r.from;
     mergedTo = r.to;
   }
+  const seq = ++mergedRenderSeq;
+  const rangeFrom = mergedFrom;
+  const rangeTo = mergedTo;
+  const presetKind = mergedPresetKind;
+  const sites = await api('/admin/api/sites');
+  if (seq !== mergedRenderSeq) return;
+  const siteList = sites.items || [];
   const siteOpts =
     `<option value="">${escHtml(t('invoices.filter.all'))}</option>` +
     siteList
@@ -2956,6 +2969,7 @@ async function merged() {
   } catch {
     parties = { items: [] };
   }
+  if (seq !== mergedRenderSeq) return;
   const partyList = (parties.items || []).filter(
     (p) => p.active !== false && (p.is_shared || !mergedSiteId || p.site_id === mergedSiteId),
   );
@@ -2986,19 +3000,21 @@ async function merged() {
   if (mergedSiteId) qs.set('site', mergedSiteId);
   qs.set('includeDeleted', '1');
   const listData = await api('/admin/api/merged?' + qs.toString());
+  if (seq !== mergedRenderSeq) return;
   mergedListCache = listData.items || [];
 
   let candHtml = `<p class="pg-card-hint">${t('merged.candidatesHint')}</p>`;
-  if (mergedLoadCandidates && mergedFrom && mergedTo) {
+  if (mergedLoadCandidates && rangeFrom && rangeTo) {
     try {
       const candQs = new URLSearchParams({
-        from: mergedFrom,
-        to: mergedTo,
+        from: rangeFrom,
+        to: rangeTo,
       });
       if (mergedSiteId) candQs.set('siteId', mergedSiteId);
       if (mergedBuyerCode) candQs.set('buyerCode', mergedBuyerCode);
       if (mergedSellerCode) candQs.set('sellerCode', mergedSellerCode);
       const cand = await api(`/admin/api/merged/candidates?${candQs.toString()}`);
+      if (seq !== mergedRenderSeq) return;
       mergedCandidates = cand.items || [];
       const groups = {};
       mergedCandidates.forEach((c) => {
@@ -3049,14 +3065,16 @@ async function merged() {
   const chip = (cls, label, onclick, active) =>
     `<button type="button" class="merged-chip ${cls}${active ? ' is-active' : ''}" onclick="${onclick}">${label}</button>`;
   const preset = (id, label) =>
-    chip('chip-preset', label, `setMergedRangePreset('${id}')`, mergedPresetKind === id);
+    chip('chip-preset', label, `setMergedRangePreset('${id}')`, presetKind === id);
 
+  if (seq !== mergedRenderSeq) return;
   const pageList = pagerSlice('merged', mergedListCache);
   content.innerHTML = `<div class="pg-card merged-page"><div class="pg-card-head">${t('merged.title')}</div><div class="pg-card-body">
     <p class="pg-card-hint">${t('merged.hint')}</p>
     <div class="party-form-card" style="margin-top:.5rem">
       <h3>${t('merged.createTitle')}</h3>
       <div class="merged-filter-bar">
+        <div class="merged-filter-row merged-filter-row-query">
         <div class="merged-filter-group">
           <div class="merged-filter-field">
             <label class="pg-label">${t('mappings.site')}</label>
@@ -3076,11 +3094,11 @@ async function merged() {
         <div class="merged-filter-group">
           <div class="merged-filter-field">
             <label class="pg-label">${t('merged.from')}</label>
-            <input class="pg-input" type="date" id="mergedFrom" value="${escHtml(mergedFrom)}" onchange="mergedPresetKind='';mergedFrom=this.value"/>
+            <input class="pg-input" type="date" id="mergedFrom" autocomplete="off" value="${escHtml(rangeFrom)}" onchange="onMergedDateChanged('from', this.value)"/>
           </div>
           <div class="merged-filter-field">
             <label class="pg-label">${t('merged.to')}</label>
-            <input class="pg-input" type="date" id="mergedTo" value="${escHtml(mergedTo)}" onchange="mergedPresetKind='';mergedTo=this.value"/>
+            <input class="pg-input" type="date" id="mergedTo" autocomplete="off" value="${escHtml(rangeTo)}" onchange="onMergedDateChanged('to', this.value)"/>
           </div>
         </div>
         <div class="merged-filter-group merged-filter-presets">
@@ -3095,6 +3113,8 @@ async function merged() {
         <div class="merged-filter-group merged-filter-actions">
           ${chip('chip-load', t('merged.loadCandidates'), 'loadMergedCandidates()', mergedLastAction === 'load')}
         </div>
+        </div>
+        <div class="merged-filter-row merged-filter-row-actions">
         <div class="merged-filter-group merged-filter-actions-right">
           ${chip('chip-reset', t('merged.reset'), 'resetMergedFilters()', mergedLastAction === 'reset')}
           ${chip('chip-select-all', t('merged.selectAll'), 'setMergedCandidatesChecked(true)', mergedSelectAction === 'all')}
@@ -3102,6 +3122,7 @@ async function merged() {
           ${chip('chip-mode', t('merged.mode.lines'), "setMergedPdfMode('lines')", mergedPdfMode === 'lines').replace('class="merged-chip', 'data-mode="lines" class="merged-chip')}
           ${chip('chip-mode', t('merged.mode.total'), "setMergedPdfMode('total')", mergedPdfMode === 'total').replace('class="merged-chip', 'data-mode="total" class="merged-chip')}
           ${chip('chip-create', t('merged.create'), 'createMerged()', mergedLastAction === 'create')}
+        </div>
         </div>
       </div>
       ${candHtml}
@@ -3154,6 +3175,16 @@ async function merged() {
     ${renderPageSizeBar('merged', mergedListCache.length)}
     <div id="mergedDetailBox" style="margin-top:1rem"></div>
   </div></div>`;
+
+  if (seq !== mergedRenderSeq) return;
+  mergedFrom = rangeFrom;
+  mergedTo = rangeTo;
+  mergedPresetKind = presetKind;
+  applyMergedDateInputs();
+  requestAnimationFrame(() => {
+    if (seq !== mergedRenderSeq) return;
+    applyMergedDateInputs();
+  });
 
   if (mergedViewId) {
     openMergedDetail(mergedViewId);

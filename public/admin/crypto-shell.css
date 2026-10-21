@@ -417,11 +417,25 @@ body {
 .pg-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .65rem; }
 .merged-filter-bar {
   display: flex;
-  flex-wrap: nowrap;
-  gap: .45rem .55rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .4rem;
+  width: 100%;
+  overflow: visible;
+}
+.merged-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem .28rem;
   align-items: flex-end;
   width: 100%;
-  overflow-x: auto;
+  min-width: 0;
+}
+.merged-filter-row-query {
+  justify-content: flex-start;
+}
+.merged-filter-row-actions {
+  justify-content: flex-end;
 }
 .merged-filter-group {
   display: flex;
@@ -436,8 +450,8 @@ body {
   max-width: 6.75rem;
 }
 .merged-filter-field-party {
-  width: 9.5rem;
-  max-width: 9.5rem;
+  width: 8.8rem;
+  max-width: 8.8rem;
 }
 .merged-filter-field .pg-label {
   font-size: 10px;
@@ -465,7 +479,7 @@ body {
   align-self: flex-end;
 }
 .merged-filter-actions-right {
-  margin-left: auto;
+  margin-left: 0;
 }
 .merged-chip {
   display: inline-flex;
@@ -479,7 +493,7 @@ body {
   font: inherit;
   font-size: 11px;
   font-weight: 600;
-  padding: .2rem .45rem;
+  padding: .2rem .36rem;
   height: 1.7rem;
   line-height: 1.2;
   white-space: nowrap;
